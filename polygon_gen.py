@@ -52,38 +52,58 @@ def generate_polygon_stimulus(num_vertices, stretch_amt, rotation_deg, target_id
 
 def run_automated_experiment(trial_list, display_duration_sec=3):
     """
-    Displays the trials automatically with a fixed time interval.
-
-    Args:
-        trial_list (list): List of trial dictionaries.
-        display_duration_ms (int): Time to show each image in milliseconds.
+    Displays the trials in true fullscreen with white background padding.
     """
     print(f"Starting experiment. Each trial lasts {display_duration_sec}sec.")
     print("Press 'q' at any time to stop the experiment.")
 
     window_name = "Polygons"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    display_duration_ms = display_duration_sec*1000
+
+    # 1. Setup Fullscreen
+    cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+    # 2. Give the OS time to adjust (fixes the "40 pixels" error)
+    cv2.waitKey(500)
+
+    display_duration_ms = int(display_duration_sec * 1000)
 
     for i, trial in enumerate(trial_list):
-        # 1. Get the image (assuming it's stored in the dict)
         pil_image = trial["image"]
-
-        # 2. Convert PIL image to OpenCV format (BGR)
         open_cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
 
-        # 3. Display the image
-        cv2.imshow(window_name, open_cv_image)
+        # 3. Securely get screen resolution
+        rect = cv2.getWindowImageRect(window_name)
+        sw, sh = rect[2], rect[3]
 
-        # 4. Wait for the specified time OR for a 'q' key press to quit
-        # cv2.waitKey returns the code of the pressed key
+        # If the system still reports a tiny height (like 40), use a standard fallback
+        if sh < 100:
+            sw, sh = 1920, 1080
+
+            # 4. Create the white background
+        full_screen_img = np.full((sh, sw, 3), 255, dtype=np.uint8)
+
+        h, w = open_cv_image.shape[:2]
+
+        # 5. Calculate offsets and handle potential size mismatches
+        y_off = max(0, (sh - h) // 2)
+        x_off = max(0, (sw - w) // 2)
+
+        # Slice logic to prevent ValueError if image is larger than screen
+        slice_h = min(h, sh)
+        slice_w = min(w, sw)
+
+        # 6. Paste image into the white canvas
+        full_screen_img[y_off:y_off + slice_h, x_off:x_off + slice_w] = open_cv_image[:slice_h, :slice_w]
+
+        cv2.imshow(window_name, full_screen_img)
+
         key = cv2.waitKey(display_duration_ms) & 0xFF
         if key == ord('q'):
             print("Experiment terminated by user.")
             break
 
     cv2.destroyAllWindows()
-
 
 # --- Example Execution Workflow ---
 
