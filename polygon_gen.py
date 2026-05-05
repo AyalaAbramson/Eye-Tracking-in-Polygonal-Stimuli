@@ -12,10 +12,33 @@ from PIL import Image, ImageDraw, ImageOps
 IMAGE_DATABASE_PATH = r"C:\Users\User\Desktop\דברים\תמונות"  # change according to data path
 IMAGE_SIZE = (800, 800)
 DISPLAY_TIME_SEC = 5
+FIXATION_TIME_SEC = 1.0  # calibration "+" duration
 
 # Setting the seed here ensures the shuffle and image selection
 # are identical every time the script runs.
 random.seed(42)
+
+
+def wait_for_fixation(target_point, window_name):
+    """
+    Pauses the experiment on the fixation screen until a signal is received.
+    Returns True to proceed to the stimulus, or False to quit the experiment.
+    """
+    while True:
+        # FUTURE EYE-TRACKER IMPLEMENTATION:
+        # Check if the user's gaze is on the target_point
+        # if eye_tracker.is_looking_at(target_point):
+        #     return True
+
+        key = cv2.waitKey(1) & 0xFF
+
+        # Press 'Space' to manually continue to the next stimulus
+        if key == ord(' '):
+            return True
+
+        # Press 'q' to completely abort the experiment
+        if key == ord('q'):
+            return False
 
 
 def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, size=(800, 800),
@@ -136,49 +159,64 @@ def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, targ
     return final_img, points[target_idx]
 
 
-def run_automated_experiment(trial_list, display_duration_sec=3):
+def run_full_experiment(trial_list, display_duration_sec=3):
     """
-    Handles the fullscreen display and timing of the stimulus sequence.
+    Handles the full-screen display loop: Fixation -> Pause/Wait -> Stimulus.
     """
-    window_name = "Polygons"
-
-    # Set up the window for true fullscreen display
+    window_name = "Experiment"
     cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
     cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.waitKey(500) # Stabilization pause
 
-    # Short pause to allow the OS to stabilize the fullscreen window
-    cv2.waitKey(500)
+    # Detect actual screen resolution
+    rect = cv2.getWindowImageRect(window_name)
+    sw, sh = rect[2], rect[3]
+    if sh < 100:
+        sw, sh = 1920, 1080 # Fallback resolution
 
-    for i, trial in enumerate(trial_list):
-        # Convert PIL Image to OpenCV format (BGR)
+    # --- NEW: Define 3x3 Fixation Grid ---
+    # Create a margin of 10% from the edges of the screen
+    margin_x, margin_y = sw // 10, sh // 10
+    grid_x = np.linspace(margin_x, sw - margin_x, 3, dtype=int)
+    grid_y = np.linspace(margin_y, sh - margin_y, 3, dtype=int)
+    grid_points = list(itertools.product(grid_x, grid_y))
+
+    for trial in trial_list:
+        # --- NEW: Fixation Screen Step ---
+        target_point = random.choice(grid_points)
+        px, py = target_point
+
+        # Create a white background for the fixation cross
+        fixation_screen = np.full((sh, sw, 3), 255, dtype=np.uint8)
+        cross_size = 20
+
+        # Draw the cross (+)
+        cv2.line(fixation_screen, (px - cross_size, py), (px + cross_size, py), (0, 0, 0), 2)
+        cv2.line(fixation_screen, (px, py - cross_size), (px, py + cross_size), (0, 0, 0), 2)
+
+        cv2.imshow(window_name, fixation_screen)
+
+        # Pause execution here until Eye-tracker feedback or Spacebar press
+        continue_experiment = wait_for_fixation(target_point, window_name)
+
+        if not continue_experiment:
+            print("Experiment terminated by user.")
+            break
+
+        # --- Stimulus Display Step ---
         pil_image = trial["image"]
         open_cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
 
-        # Get actual screen resolution
-        rect = cv2.getWindowImageRect(window_name)
-        sw, sh = rect[2], rect[3]
-
-        # Fallback if window dimensions are not yet detected correctly
-        if sh < 100:
-            sw, sh = 1920, 1080
-
-        # Create a full-screen white canvas
         full_screen_img = np.full((sh, sw, 3), 255, dtype=np.uint8)
-
-        # Calculate offsets to center the stimulus
         h, w = open_cv_image.shape[:2]
-        y_off, x_off = max(0, (sh - h) // 2), max(0, (sw - w) // 2)
-
-        # Securely copy the stimulus onto the canvas (prevents broadcast errors)
-        slice_h, slice_w = min(h, sh), min(w, sw)
+        y_off, x_off = max(0, (sh - h) // 2), max(0, (sw - w) // 2)  # Ensure offsets are never negative
+        slice_h, slice_w = min(h, sh), min(w, sw)   # Ensure the slice dimensions do not exceed the screen size
         full_screen_img[y_off:y_off + slice_h, x_off:x_off + slice_w] = open_cv_image[:slice_h, :slice_w]
 
-        # Display and wait
         cv2.imshow(window_name, full_screen_img)
 
-        # Close experiment if 'q' is pressed
+        # Display the stimulus for the predefined duration
         if cv2.waitKey(int(display_duration_sec * 1000)) & 0xFF == ord('q'):
-            print("Experiment terminated by user.")
             break
 
     cv2.destroyAllWindows()
@@ -251,7 +289,7 @@ for (radii, angles), rot, is_filled in manual_combos:
 # Change the list name to switch between experiments
 
 print(f"Starting experiment with {len(trial_data_auto)} automated trials...")
-#run_automated_experiment(trial_data_auto, display_duration_sec=DISPLAY_TIME_SEC)
+# run_full_experiment(trial_data_auto, display_duration_sec=DISPLAY_TIME_SEC)
 
 # To run manual instead, uncomment the line below and comment the one above:
-run_automated_experiment(trial_data_manual, display_duration_sec=DISPLAY_TIME_SEC)
+# run_full_experiment(trial_data_manual, display_duration_sec=DISPLAY_TIME_SEC)
