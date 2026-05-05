@@ -75,9 +75,8 @@ def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, siz
     return final_img
 
 
-def generate_polygon_stimulus(num_vertices=None, stretch_amt=0, rotation_deg=0, target_idx=None,
-                              size=(800, 800), texture_path=None,
-                              concave_idx=None):
+def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, target_idx=None,
+                          concave_idx=None, size=(800, 800), texture_path=None):
     """
     Generates a polygon with a specific concave vertex and a target vertex
     whose stretch starts from a flat-edge position.
@@ -134,7 +133,6 @@ def generate_polygon_stimulus(num_vertices=None, stretch_amt=0, rotation_deg=0, 
     draw = ImageDraw.Draw(final_img)
     draw.polygon(points, outline="black", width=5)
 
-
     return final_img, points[target_idx]
 
 
@@ -186,60 +184,74 @@ def run_automated_experiment(trial_list, display_duration_sec=3):
     cv2.destroyAllWindows()
 
 
-# --- EXECUTION ---
-
-# Gather all image files from the specified directory and subdirectories
+# --- 1. GATHER IMAGES ---
 image_files = glob.glob(os.path.join(IMAGE_DATABASE_PATH, "**/*.jpg"), recursive=True) + \
               glob.glob(os.path.join(IMAGE_DATABASE_PATH, "**/*.png"), recursive=True)
-
-# Sorting ensures that random.choice behaves identically across different machines/runs
 image_files.sort()
 
 if not image_files:
-    print(f"No images found in {IMAGE_DATABASE_PATH}. Check your path!")
-else:
-    print(f"Found {len(image_files)} images.")
+    print(f"Warning: No images found in {IMAGE_DATABASE_PATH}")
 
-# Define experimental parameters
-polygon_types = [4, 5, 6]
-stretch_val = 50   # stretch amount
-stretch_steps = [step * stretch_val for step in range(-2, 3)]  # 5 stretch options
+# --- 2. PREPARE AUTOMATED EXPERIMENT ---
+# Factors for the automated generation
+auto_polygon_types = [4, 5, 6]
+stretch_val = 50
+stretch_steps = [step * stretch_val for step in range(-2, 3)]
 rotation_options = [0, 45, 90]
-fill = [True, False]  # Empty / image fill
-concave_idx = [None, 0]  # Change according to wanted concave vertex
-reps = 0  # number of repetitions for each polygon in the experiment
-manual_degrees = []  # Relevant to manual polygon:  sum=360
-manual_radius = []  # Relevant to manual polygon: len = len of manual degrees
+fill_options = [True, False]
+concave_options = [None, 2]
 
-# Generate all possible combinations of the factors
-all_combinations = list(itertools.product(polygon_types, stretch_steps, rotation_options, fill, concave_idx))
+# Generate all automated combinations
+auto_combos = list(
+    itertools.product(auto_polygon_types, stretch_steps, rotation_options, fill_options, concave_options))
+random.shuffle(auto_combos)
 
-# Shuffle the combinations (Order is consistent because of random.seed)
-random.shuffle(all_combinations)
+trial_data_auto = []
+for sides, s_amt, rot, is_filled, c_idx in auto_combos:
+    tex = random.choice(image_files) if (image_files and is_filled) else None
 
-trial_data = []
-
-# Build the stimulus list
-for i, (sides, stretch, rot) in enumerate(all_combinations):
-    # Pick a texture randomly. Because of the seed, the same image
-    # will be paired with the same polygon parameters every time.
-    current_tex = random.choice(image_files) if image_files else None
-
-    stim_img, coords = generate_polygon_stimulus(
-        sides, stretch, rot,
-        highlight_target=True,
-        size=IMAGE_SIZE,
-        texture_path=current_tex
+    img, _ = generate_auto_polygon(
+        num_vertices=sides,
+        stretch_amt=s_amt,
+        rotation_deg=rot,
+        target_idx=0,  # The vertex that gets stretched
+        concave_idx=c_idx,
+        texture_path=tex,
+        size=IMAGE_SIZE
     )
+    trial_data_auto.append({"image": img, "type": "auto"})
 
-    # Store necessary data for the experiment loop
-    trial_data.append({
-        "image": stim_img,
-        "sides": sides,
-        "stretch": stretch,
-        "rot": rot,
-        "texture": current_tex
-    })
+# --- 3. PREPARE MANUAL EXPERIMENT ---
+# Define your manual shapes as pairs of (radii_list, angles_list)
+manual_shapes = [
+    # Example 1: Square with varied radii
+    ([200, 100, 200, 100], [90, 90, 90, 90]),
+    # Example 2: Triangle with specific angles
+    ([250, 200, 250], [150, 110, 100]),
+]
 
-# Start the automated display
-run_automated_experiment(trial_data, display_duration_sec=DISPLAY_TIME_SEC)
+# Manual combinations (Shape x Rotation x Fill)
+manual_combos = list(itertools.product(manual_shapes, rotation_options, fill_options))
+random.shuffle(manual_combos)
+
+trial_data_manual = []
+for (radii, angles), rot, is_filled in manual_combos:
+    tex = random.choice(image_files) if (image_files and is_filled) else None
+
+    img = generate_manual_polygon(
+        manual_radii=radii,
+        manual_angles_deg=angles,
+        rotation_deg=rot,
+        texture_path=tex,
+        size=IMAGE_SIZE
+    )
+    trial_data_manual.append({"image": img, "type": "manual"})
+
+# --- 4. START EXPERIMENT ---
+# Change the list name to switch between experiments
+
+print(f"Starting experiment with {len(trial_data_auto)} automated trials...")
+#run_automated_experiment(trial_data_auto, display_duration_sec=DISPLAY_TIME_SEC)
+
+# To run manual instead, uncomment the line below and comment the one above:
+run_automated_experiment(trial_data_manual, display_duration_sec=DISPLAY_TIME_SEC)
