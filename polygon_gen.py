@@ -83,17 +83,20 @@ def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, siz
     final_img = Image.new("RGB", size, "white")
 
     # Apply texture if provided
+    has_texture = False
     if texture_path and os.path.exists(texture_path):
         try:
             texture = Image.open(texture_path).convert("RGB")
             texture = ImageOps.fit(texture, size, Image.Resampling.LANCZOS)
             final_img.paste(texture, (0, 0), mask)
+            has_texture = True
         except Exception as e:
             print(f"Error loading texture: {e}")
 
-    # Draw the final outline
-    draw = ImageDraw.Draw(final_img)
-    draw.polygon(points, outline="black", width=5)
+    # Draw the final outline ONLY if there is no image filling the polygon
+    if not has_texture:
+        draw = ImageDraw.Draw(final_img)
+        draw.polygon(points, outline="black", width=5)
 
     return final_img
 
@@ -145,16 +148,20 @@ def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, targ
     mask_draw.polygon(points, fill=255)
     final_img = Image.new("RGB", size, "white")
 
+    has_texture = False
     if texture_path and os.path.exists(texture_path):
         try:
             texture = Image.open(texture_path).convert("RGB")
             texture = ImageOps.fit(texture, size, Image.Resampling.LANCZOS)
             final_img.paste(texture, (0, 0), mask)
+            has_texture = True
         except Exception as e:
             print(f"Error loading image: {e}")
 
-    draw = ImageDraw.Draw(final_img)
-    draw.polygon(points, outline="black", width=5)
+    # Draw the final outline ONLY if there is no image filling the polygon
+    if not has_texture:
+        draw = ImageDraw.Draw(final_img)
+        draw.polygon(points, outline="black", width=5)
 
     return final_img, points[target_idx]
 
@@ -172,13 +179,25 @@ def run_full_experiment(trial_list, display_duration_sec=3):
     rect = cv2.getWindowImageRect(window_name)
     sw, sh = rect[2], rect[3]
     if sh < 100:
-        sw, sh = 1920, 1080 # Fallback resolution
+        sw, sh = 1920, 1080  # Fallback resolution
 
-    # --- NEW: Define 3x3 Fixation Grid ---
-    # Create a margin of 10% from the edges of the screen
-    margin_x, margin_y = sw // 10, sh // 10
-    grid_x = np.linspace(margin_x, sw - margin_x, 3, dtype=int)
-    grid_y = np.linspace(margin_y, sh - margin_y, 3, dtype=int)
+    # --- Define 3x3 Fixation Grid (Centered Square) ---
+    # Determine the side length of the square grid (e.g., 80% of the screen height)
+    grid_size = int(sh * 0.3)
+
+    # Find the exact center of the screen
+    center_x = sw // 2
+    center_y = sh // 2
+
+    # Calculate the start and end boundaries for both axes based on the center
+    start_x = center_x - (grid_size // 2)
+    end_x = center_x + (grid_size // 2)
+    start_y = center_y - (grid_size // 2)
+    end_y = center_y + (grid_size // 2)
+
+    # Generate the symmetrical 3x3 points within the calculated square
+    grid_x = np.linspace(start_x, end_x, 3, dtype=int)
+    grid_y = np.linspace(start_y, end_y, 3, dtype=int)
     grid_points = list(itertools.product(grid_x, grid_y))
 
     for trial in trial_list:
@@ -232,11 +251,11 @@ if not image_files:
 
 # --- 2. PREPARE AUTOMATED EXPERIMENT ---
 # Factors for the automated generation
-auto_polygon_types = [4, 5, 6]
+auto_polygon_types = [4, 5]
 stretch_val = 50
 stretch_steps = [step * stretch_val for step in range(-2, 3)]
-rotation_options = [0, 45, 90]
-fill_options = [True, False]
+rotation_options = [0, 90]
+fill_options = [True]
 concave_options = [None, 2]
 
 # Generate all automated combinations
@@ -289,7 +308,7 @@ for (radii, angles), rot, is_filled in manual_combos:
 # Change the list name to switch between experiments
 
 print(f"Starting experiment with {len(trial_data_auto)} automated trials...")
-# run_full_experiment(trial_data_auto, display_duration_sec=DISPLAY_TIME_SEC)
+run_full_experiment(trial_data_auto, display_duration_sec=DISPLAY_TIME_SEC)
 
 # To run manual instead, uncomment the line below and comment the one above:
 # run_full_experiment(trial_data_manual, display_duration_sec=DISPLAY_TIME_SEC)
