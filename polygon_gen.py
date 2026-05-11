@@ -13,6 +13,8 @@ IMAGE_DATABASE_PATH = r"C:\Users\User\Desktop\דברים\תמונות"  # change
 IMAGE_SIZE = (800, 800)
 DISPLAY_TIME_SEC = 5
 FIXATION_TIME_SEC = 1.0  # calibration "+" duration
+TRIAL_REPETITIONS = 1  # Number of times each polygon combination repeats
+DEBUG_MODE = True  # Toggle to False for the real experiment
 
 # Setting the seed here ensures the shuffle and image selection
 # are identical every time the script runs.
@@ -98,7 +100,7 @@ def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, siz
         draw = ImageDraw.Draw(final_img)
         draw.polygon(points, outline="black", width=5)
 
-    return final_img
+    return final_img, points, None
 
 
 def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, target_idx=None,
@@ -120,11 +122,14 @@ def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, targ
     rotation_rad = math.radians(rotation_deg)
 
     points = []
+    base_points = []
     for i in range(num_vertices):
         angle = (2 * math.pi * i / num_vertices) - (math.pi / 2) + rotation_rad
+        base_x = center_x + base_radius * math.cos(angle)
+        base_y = center_y + base_radius * math.sin(angle)
+        base_points.append((base_x, base_y))  # points for debug mode
 
         # --- RADIUS LOGIC ---
-
         # 1. First priority: Is it the concave vertex? (Folded inward)
         if concave_idx is not None and i == concave_idx:
             current_radius = base_radius / 2
@@ -163,17 +168,17 @@ def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, targ
         draw = ImageDraw.Draw(final_img)
         draw.polygon(points, outline="black", width=5)
 
-    return final_img, points[target_idx]
+    return final_img, points, base_points
 
 
-def run_full_experiment(trial_list, display_duration_sec=3):
+def run_full_experiment(trial_list, display_duration_sec=3, debug=False):
     """
     Handles the full-screen display loop: Fixation -> Pause/Wait -> Stimulus.
     """
     window_name = "Experiment"
     cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
     cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-    cv2.waitKey(500) # Stabilization pause
+    cv2.waitKey(500)  # Stabilization pause
 
     # Detect actual screen resolution
     rect = cv2.getWindowImageRect(window_name)
@@ -181,33 +186,47 @@ def run_full_experiment(trial_list, display_duration_sec=3):
     if sh < 100:
         sw, sh = 1920, 1080  # Fallback resolution
 
-    # --- Define 3x3 Fixation Grid (Centered Square) ---
-    # Determine the side length of the square grid (e.g., 80% of the screen height)
-    grid_size = int(sh * 0.3)
-
-    # Find the exact center of the screen
+    # --- Define Main Fixation Grid (Large, 80% of screen) ---
+    grid_size = int(sh * 0.8)
     center_x = sw // 2
     center_y = sh // 2
 
-    # Calculate the start and end boundaries for both axes based on the center
     start_x = center_x - (grid_size // 2)
     end_x = center_x + (grid_size // 2)
     start_y = center_y - (grid_size // 2)
     end_y = center_y + (grid_size // 2)
 
-    # Generate the symmetrical 3x3 points within the calculated square
     grid_x = np.linspace(start_x, end_x, 3, dtype=int)
     grid_y = np.linspace(start_y, end_y, 3, dtype=int)
     grid_points = list(itertools.product(grid_x, grid_y))
 
+    # --- Define Mini-Grid for Polygon Placement (Small, e.g., 20% of screen) ---
+    mini_grid_size = int(sh * 0.2)  # Change 0.2 to adjust the spread of the polygons
+
+    m_start_x = center_x - (mini_grid_size // 2)
+    m_end_x = center_x + (mini_grid_size // 2)
+    m_start_y = center_y - (mini_grid_size // 2)
+    m_end_y = center_y + (mini_grid_size // 2)
+
+    mini_grid_x = np.linspace(m_start_x, m_end_x, 3, dtype=int)
+    mini_grid_y = np.linspace(m_start_y, m_end_y, 3, dtype=int)
+    mini_grid_points = list(itertools.product(mini_grid_x, mini_grid_y))
+
     for trial in trial_list:
-        # --- NEW: Fixation Screen Step ---
+        # --- Fixation Screen Step ---
         target_point = random.choice(grid_points)
         px, py = target_point
 
         # Create a white background for the fixation cross
         fixation_screen = np.full((sh, sw, 3), 255, dtype=np.uint8)
         cross_size = 20
+
+        # Draw Grids on Fixation (ONLY IN DEBUG MODE)
+        if debug:
+            for gx, gy in grid_points:
+                cv2.circle(fixation_screen, (gx, gy), 5, (255, 0, 0), -1)
+            for mx, my in mini_grid_points:
+                cv2.circle(fixation_screen, (mx, my), 5, (0, 255, 0), -1)
 
         # Draw the cross (+)
         cv2.line(fixation_screen, (px - cross_size, py), (px + cross_size, py), (0, 0, 0), 2)
@@ -228,9 +247,52 @@ def run_full_experiment(trial_list, display_duration_sec=3):
 
         full_screen_img = np.full((sh, sw, 3), 255, dtype=np.uint8)
         h, w = open_cv_image.shape[:2]
-        y_off, x_off = max(0, (sh - h) // 2), max(0, (sw - w) // 2)  # Ensure offsets are never negative
-        slice_h, slice_w = min(h, sh), min(w, sw)   # Ensure the slice dimensions do not exceed the screen size
-        full_screen_img[y_off:y_off + slice_h, x_off:x_off + slice_w] = open_cv_image[:slice_h, :slice_w]
+
+        # NEW: Choose a random center point from the MINI-GRID for the polygon
+        stim_px, stim_py = random.choice(mini_grid_points)
+
+        # Calculate the ideal top-left coordinate to place the center of the image on the grid point
+        x_off = stim_px - (w // 2)
+        y_off = stim_py - (h // 2)
+
+        # Safely calculate boundaries to prevent drawing outside the screen
+        # 1. Screen coordinates (where to draw on the monitor)
+        screen_x1 = max(0, x_off)
+        screen_y1 = max(0, y_off)
+        screen_x2 = min(sw, x_off + w)
+        screen_y2 = min(sh, y_off + h)
+
+        # 2. Image coordinates (what part of the polygon image to crop if it goes out of bounds)
+        img_x1 = max(0, -x_off)
+        img_y1 = max(0, -y_off)
+        img_x2 = img_x1 + (screen_x2 - screen_x1)
+        img_y2 = img_y1 + (screen_y2 - screen_y1)
+
+        # Safely copy the image slice onto the full screen canvas
+        if screen_x1 < screen_x2 and screen_y1 < screen_y2:
+            full_screen_img[screen_y1:screen_y2, screen_x1:screen_x2] = open_cv_image[img_y1:img_y2, img_x1:img_x2]
+
+        # Draw Overlays on Stimulus (ONLY IN DEBUG MODE)
+        if debug:
+            for gx, gy in grid_points:
+                cv2.circle(full_screen_img, (gx, gy), 5, (255, 0, 0), -1)
+            for mx, my in mini_grid_points:
+                cv2.circle(full_screen_img, (mx, my), 5, (0, 255, 0), -1)
+
+            cv2.circle(full_screen_img, (stim_px, stim_py), 8, (0, 0, 255), -1)
+
+            base_pts = trial.get("base_points")
+            if base_pts:
+                screen_base_pts = [(int(bx + x_off), int(by + y_off)) for bx, by in base_pts]
+                for i in range(len(screen_base_pts)):
+                    p1 = screen_base_pts[i]
+                    p2 = screen_base_pts[(i + 1) % len(screen_base_pts)]
+                    cv2.line(full_screen_img, p1, p2, (0, 165, 255), 2)
+
+            for px_img, py_img in trial.get("points", []):
+                sx, sy = int(px_img + x_off), int(py_img + y_off)
+                cv2.line(full_screen_img, (stim_px, stim_py), (sx, sy), (255, 0, 255), 2)
+                cv2.circle(full_screen_img, (sx, sy), 6, (255, 0, 255), -1)
 
         cv2.imshow(window_name, full_screen_img)
 
@@ -259,15 +321,16 @@ fill_options = [True]
 concave_options = [None, 2]
 
 # Generate all automated combinations
-auto_combos = list(
+base_auto_combos = list(
     itertools.product(auto_polygon_types, stretch_steps, rotation_options, fill_options, concave_options))
+auto_combos = base_auto_combos * TRIAL_REPETITIONS
 random.shuffle(auto_combos)
 
 trial_data_auto = []
 for sides, s_amt, rot, is_filled, c_idx in auto_combos:
     tex = random.choice(image_files) if (image_files and is_filled) else None
 
-    img, _ = generate_auto_polygon(
+    img, actual_points, base_points = generate_auto_polygon(
         num_vertices=sides,
         stretch_amt=s_amt,
         rotation_deg=rot,
@@ -276,7 +339,8 @@ for sides, s_amt, rot, is_filled, c_idx in auto_combos:
         texture_path=tex,
         size=IMAGE_SIZE
     )
-    trial_data_auto.append({"image": img, "type": "auto"})
+    trial_data_auto.append({"image": img, "type": "auto", "points": actual_points,
+                            "base_points": base_points})
 
 # --- 3. PREPARE MANUAL EXPERIMENT ---
 # Define your manual shapes as pairs of (radii_list, angles_list)
@@ -288,7 +352,8 @@ manual_shapes = [
 ]
 
 # Manual combinations (Shape x Rotation x Fill)
-manual_combos = list(itertools.product(manual_shapes, rotation_options, fill_options))
+base_manual_combos = list(itertools.product(manual_shapes, rotation_options, fill_options))
+manual_combos = base_manual_combos * TRIAL_REPETITIONS
 random.shuffle(manual_combos)
 
 trial_data_manual = []
@@ -308,7 +373,7 @@ for (radii, angles), rot, is_filled in manual_combos:
 # Change the list name to switch between experiments
 
 print(f"Starting experiment with {len(trial_data_auto)} automated trials...")
-run_full_experiment(trial_data_auto, display_duration_sec=DISPLAY_TIME_SEC)
+run_full_experiment(trial_data_auto, display_duration_sec=DISPLAY_TIME_SEC, debug=DEBUG_MODE)
 
 # To run manual instead, uncomment the line below and comment the one above:
-# run_full_experiment(trial_data_manual, display_duration_sec=DISPLAY_TIME_SEC)
+# run_full_experiment(trial_data_manual, display_duration_sec=DISPLAY_TIME_SEC, debug=DEBUG_MODE)
