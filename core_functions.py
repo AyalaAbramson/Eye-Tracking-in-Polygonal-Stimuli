@@ -2,9 +2,10 @@ import os
 import math
 import random
 import itertools
-import cv2
+from psychopy import visual, event, core
 import numpy as np
 from PIL import Image, ImageDraw, ImageOps
+
 
 def wait_for_fixation(target_point, window_name):
     """
@@ -19,8 +20,9 @@ def wait_for_fixation(target_point, window_name):
         key = cv2.waitKey(1) & 0xFF
         if key == ord(' '):
             return True
-        if key == ord('q'):
+        if key == ord('q') or key == 27:
             return False
+
 
 def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, size=(800, 800),
                             texture_path=None):
@@ -69,8 +71,9 @@ def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, siz
 
     return final_img, points, None
 
+
 def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, target_idx=None,
-                          concave_idx=None, size=(800, 800), texture_path=None):
+                          concave_idx=None, concave_ratio=0, size=(800, 800), texture_path=None):
     """
     Generates a polygon with a specific concave vertex and a target vertex.
     Returns: image, list of actual points, list of base (skeleton) points
@@ -96,9 +99,11 @@ def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, targ
         base_points.append((base_x, base_y))
 
         if concave_idx is not None and i == concave_idx:
-            current_radius = base_radius / 2
+            flat_edge_radius = base_radius * math.cos(2 * math.pi / num_vertices)
+            concave_depth = base_radius * concave_ratio
+            current_radius = flat_edge_radius - concave_depth
         elif target_idx is not None and i == target_idx:
-            flat_edge_radius = base_radius * math.cos(math.pi / num_vertices)
+            flat_edge_radius = base_radius * math.cos(2 * math.pi / num_vertices)
             current_radius = flat_edge_radius + stretch_amt
         else:
             current_radius = base_radius
@@ -125,6 +130,7 @@ def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, targ
         draw.polygon(points, outline="black", width=5)
 
     return final_img, points, base_points
+
 
 def run_full_experiment(trial_list, display_duration_sec=3, debug=False):
     """
@@ -227,9 +233,22 @@ def run_full_experiment(trial_list, display_duration_sec=3, debug=False):
                 cv2.line(full_screen_img, (stim_px, stim_py), (sx, sy), (255, 0, 255), 2)
                 cv2.circle(full_screen_img, (sx, sy), 6, (255, 0, 255), -1)
 
+            # --- NEW: Highlight the concave vertex ---
+            c_idx = trial.get("concave_idx")
+            if c_idx is not None:
+                pts = trial.get("points", [])
+                if 0 <= c_idx < len(pts):
+                    cx_img, cy_img = pts[c_idx]
+                    sx, sy = int(cx_img + x_off), int(cy_img + y_off)
+
+                    # Draw a prominent cyan ring around the concave vertex
+                    cv2.circle(full_screen_img, (sx, sy), 14, (255, 255, 0), 3)
         cv2.imshow(window_name, full_screen_img)
 
-        if cv2.waitKey(int(display_duration_sec * 1000)) & 0xFF == ord('q'):
+        # Wait for the defined duration, or exit if 'q' or 'Esc' is pressed
+        key = cv2.waitKey(int(display_duration_sec * 1000)) & 0xFF
+        if key == ord('q') or key == 27:
+            print("Experiment terminated by user.")
             break
 
     cv2.destroyAllWindows()
