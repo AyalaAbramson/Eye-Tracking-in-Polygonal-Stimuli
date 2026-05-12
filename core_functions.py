@@ -2,26 +2,9 @@ import os
 import math
 import random
 import itertools
-from psychopy import visual, event, core
 import numpy as np
+import pygame
 from PIL import Image, ImageDraw, ImageOps
-
-
-def wait_for_fixation(target_point, window_name):
-    """
-    Pauses the experiment on the fixation screen until a signal is received.
-    Returns True to proceed to the stimulus, or False to quit the experiment.
-    """
-    while True:
-        # FUTURE EYE-TRACKER IMPLEMENTATION:
-        # if eye_tracker.is_looking_at(target_point):
-        #     return True
-
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord(' '):
-            return True
-        if key == ord('q') or key == 27:
-            return False
 
 
 def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, size=(800, 800),
@@ -134,24 +117,29 @@ def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, targ
 
 def run_full_experiment(trial_list, display_duration_sec=3, debug=False):
     """
-    Handles the full-screen display loop.
+    Handles the full-screen display loop using Pygame.
     If debug=True, draws technical overlays (grids, vertices) over the display.
     """
-    window_name = "Experiment" + (" (DEBUG MODE)" if debug else "")
-    cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
-    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-    cv2.waitKey(500)
+    import pygame
+    pygame.init()
 
-    rect = cv2.getWindowImageRect(window_name)
-    sw, sh = rect[2], rect[3]
-    if sh < 100:
-        sw, sh = 1920, 1080
+    # 1. Setup fullscreen window
+    screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+    sw, sh = screen.get_size()
+    center_x, center_y = sw // 2, sh // 2
 
-    # --- Define Grids ---
+    # Define basic colors
+    WHITE = (255, 255, 255)
+    BLACK = (0, 0, 0)
+    BLUE = (0, 0, 255)
+    GREEN = (0, 255, 0)
+    RED = (255, 0, 0)
+    MAGENTA = (255, 0, 255)
+    CYAN = (0, 255, 255)
+    ORANGE = (255, 165, 0)
+
+    # 2. Define Grids
     grid_size = int(sh * 0.8)
-    center_x = sw // 2
-    center_y = sh // 2
-
     start_x, end_x = center_x - (grid_size // 2), center_x + (grid_size // 2)
     start_y, end_y = center_y - (grid_size // 2), center_y + (grid_size // 2)
 
@@ -169,86 +157,124 @@ def run_full_experiment(trial_list, display_duration_sec=3, debug=False):
         np.linspace(m_start_y, m_end_y, 3, dtype=int)
     ))
 
+    cross_size = 20
+    clock = pygame.time.Clock()
+
     for trial in trial_list:
-        # --- Fixation Screen Step ---
+        # ==========================================
+        # STAGE 1: FIXATION SCREEN
+        # ==========================================
         target_point = random.choice(grid_points)
         px, py = target_point
 
-        fixation_screen = np.full((sh, sw, 3), 255, dtype=np.uint8)
+        screen.fill(WHITE)
 
         # Draw Grids on Fixation (ONLY IN DEBUG MODE)
         if debug:
             for gx, gy in grid_points:
-                cv2.circle(fixation_screen, (gx, gy), 5, (255, 0, 0), -1)
+                pygame.draw.circle(screen, BLUE, (gx, gy), 5)
             for mx, my in mini_grid_points:
-                cv2.circle(fixation_screen, (mx, my), 5, (0, 255, 0), -1)
+                pygame.draw.circle(screen, GREEN, (mx, my), 5)
 
-        cross_size = 20
-        cv2.line(fixation_screen, (px - cross_size, py), (px + cross_size, py), (0, 0, 0), 2)
-        cv2.line(fixation_screen, (px, py - cross_size), (px, py + cross_size), (0, 0, 0), 2)
+        # Draw Fixation Cross (+)
+        pygame.draw.line(screen, BLACK, (px - cross_size, py), (px + cross_size, py), 2)
+        pygame.draw.line(screen, BLACK, (px, py - cross_size), (px, py + cross_size), 2)
 
-        cv2.imshow(window_name, fixation_screen)
+        pygame.display.flip()
 
-        if not wait_for_fixation(target_point, window_name):
+        # Wait for SPACE to continue, or Q/ESC to abort
+        waiting_for_fixation = True
+        abort = False
+        while waiting_for_fixation:
+            for event in pygame.event.get():
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:
+                        waiting_for_fixation = False
+                    elif event.key == pygame.K_q or event.key == pygame.K_ESCAPE:
+                        abort = True
+                        waiting_for_fixation = False
+            clock.tick(60)  # Prevents the loop from freezing the computer
+
+        if abort:
             print("Experiment terminated by user.")
             break
 
-        # --- Stimulus Display Step ---
+        # ==========================================
+        # STAGE 2: STIMULUS DISPLAY
+        # ==========================================
+        screen.fill(WHITE)
+
+        # Convert PIL Image to Pygame Surface
         pil_image = trial["image"]
-        open_cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
-        full_screen_img = np.full((sh, sw, 3), 255, dtype=np.uint8)
-        h, w = open_cv_image.shape[:2]
+        mode = pil_image.mode
+        size = pil_image.size
+        data = pil_image.tobytes()
+        py_image = pygame.image.fromstring(data, size, mode)
 
         stim_px, stim_py = random.choice(mini_grid_points)
-        x_off, y_off = stim_px - (w // 2), stim_py - (h // 2)
+        w, h = size
 
-        screen_x1, screen_y1 = max(0, x_off), max(0, y_off)
-        screen_x2, screen_y2 = min(sw, x_off + w), min(sh, y_off + h)
+        # Calculate top-left coordinates to center the image perfectly
+        top_left_x = stim_px - (w // 2)
+        top_left_y = stim_py - (h // 2)
 
-        img_x1, img_y1 = max(0, -x_off), max(0, -y_off)
-        img_x2, img_y2 = img_x1 + (screen_x2 - screen_x1), img_y1 + (screen_y2 - screen_y1)
-
-        if screen_x1 < screen_x2 and screen_y1 < screen_y2:
-            full_screen_img[screen_y1:screen_y2, screen_x1:screen_x2] = open_cv_image[img_y1:img_y2, img_x1:img_x2]
+        # Blit (draw) the image onto the screen
+        screen.blit(py_image, (top_left_x, top_left_y))
 
         # Draw Overlays on Stimulus (ONLY IN DEBUG MODE)
         if debug:
             for gx, gy in grid_points:
-                cv2.circle(full_screen_img, (gx, gy), 5, (255, 0, 0), -1)
+                pygame.draw.circle(screen, BLUE, (gx, gy), 5)
             for mx, my in mini_grid_points:
-                cv2.circle(full_screen_img, (mx, my), 5, (0, 255, 0), -1)
+                pygame.draw.circle(screen, GREEN, (mx, my), 5)
 
-            cv2.circle(full_screen_img, (stim_px, stim_py), 8, (0, 0, 255), -1)
+            pygame.draw.circle(screen, RED, (stim_px, stim_py), 8)
 
+            # Draw base skeleton
             base_pts = trial.get("base_points")
             if base_pts:
-                screen_base_pts = [(int(bx + x_off), int(by + y_off)) for bx, by in base_pts]
-                for i in range(len(screen_base_pts)):
-                    p1 = screen_base_pts[i]
-                    p2 = screen_base_pts[(i + 1) % len(screen_base_pts)]
-                    cv2.line(full_screen_img, p1, p2, (0, 165, 255), 2)
+                screen_base_pts = [(int(bx + top_left_x), int(by + top_left_y)) for bx, by in base_pts]
+                if len(screen_base_pts) > 2:
+                    pygame.draw.polygon(screen, ORANGE, screen_base_pts, 2)
 
+            # Draw lines and actual points
             for px_img, py_img in trial.get("points", []):
-                sx, sy = int(px_img + x_off), int(py_img + y_off)
-                cv2.line(full_screen_img, (stim_px, stim_py), (sx, sy), (255, 0, 255), 2)
-                cv2.circle(full_screen_img, (sx, sy), 6, (255, 0, 255), -1)
+                sx, sy = int(px_img + top_left_x), int(py_img + top_left_y)
+                pygame.draw.line(screen, MAGENTA, (stim_px, stim_py), (sx, sy), 2)
+                pygame.draw.circle(screen, MAGENTA, (sx, sy), 6)
 
-            # --- NEW: Highlight the concave vertex ---
+            # Highlight the concave vertex
             c_idx = trial.get("concave_idx")
             if c_idx is not None:
                 pts = trial.get("points", [])
                 if 0 <= c_idx < len(pts):
                     cx_img, cy_img = pts[c_idx]
-                    sx, sy = int(cx_img + x_off), int(cy_img + y_off)
+                    sx, sy = int(cx_img + top_left_x), int(cy_img + top_left_y)
+                    pygame.draw.circle(screen, CYAN, (sx, sy), 14, 3)
 
-                    # Draw a prominent cyan ring around the concave vertex
-                    cv2.circle(full_screen_img, (sx, sy), 14, (255, 255, 0), 3)
-        cv2.imshow(window_name, full_screen_img)
+        pygame.display.flip()
 
-        # Wait for the defined duration, or exit if 'q' or 'Esc' is pressed
-        key = cv2.waitKey(int(display_duration_sec * 1000)) & 0xFF
-        if key == ord('q') or key == 27:
+        # Display for duration, but allow breaking out early with Q/ESC
+        start_ticks = pygame.time.get_ticks()
+        duration_ms = display_duration_sec * 1000
+        stimulus_running = True
+
+        while stimulus_running:
+            for event in pygame.event.get():
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_q or event.key == pygame.K_ESCAPE:
+                        abort = True
+                        stimulus_running = False
+
+            # Check if time is up
+            if pygame.time.get_ticks() - start_ticks > duration_ms:
+                stimulus_running = False
+
+            clock.tick(60)
+
+        if abort:
             print("Experiment terminated by user.")
             break
 
-    cv2.destroyAllWindows()
+    # Safely close Pygame window at the end
+    pygame.quit()
