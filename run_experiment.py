@@ -17,7 +17,7 @@ TRIAL_REPETITIONS = 1    # Number of times each generated shape repeats
 
 # Toggle this to True to see grids, centers, and vertices.
 # Toggle to False for the clean, real experiment.
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 random.seed(42)
 
