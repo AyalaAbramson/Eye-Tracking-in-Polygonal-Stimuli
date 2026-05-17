@@ -2,7 +2,9 @@ import os
 import glob
 import random
 import itertools
-
+import pygame
+import pylink # need to install the right directory
+import sys
 # Import the backend functions from our core file
 from core_functions import generate_auto_polygon, generate_manual_polygon, run_full_experiment
 
@@ -13,11 +15,15 @@ IMAGE_DATABASE_PATH = r"C:\Users\User\Desktop\דברים\תמונות"
 IMAGE_SIZE = (800, 800)
 DISPLAY_TIME_SEC = 5
 FIXATION_TIME_SEC = 1.0
-TRIAL_REPETITIONS = 1    # Number of times each generated shape repeats
+TRIAL_REPETITIONS = 1  # Number of times each generated shape repeats
+
+# Tracker Configuration
+TRACKER_IP = None  # Change to None if testing at home without a tracker
+EDF_FILENAME = "Check1.EDF"  # STRICT LIMIT: Maximum 8 characters!
 
 # Toggle this to True to see grids, centers, and vertices.
 # Toggle to False for the clean, real experiment.
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 random.seed(42)
 
@@ -43,7 +49,9 @@ concave_options = [2]
 concave_ratio = [0.2]
 
 # Multiply by TRIAL_REPETITIONS
-base_auto_combos = list(itertools.product(auto_polygon_types, stretch_steps, rotation_options, fill_options, concave_options, concave_ratio))
+base_auto_combos = list(
+    itertools.product(auto_polygon_types, stretch_steps, rotation_options, fill_options, concave_options,
+                      concave_ratio))
 auto_combos = base_auto_combos * TRIAL_REPETITIONS
 random.shuffle(auto_combos)
 
@@ -85,13 +93,66 @@ for (radii, angles), rot, is_filled in manual_combos:
     })
 
 # =====================================================================
-# 5. EXECUTE EXPERIMENT
+# 5. INITIALIZE PYGAME AND EYELINK
+# =====================================================================
+# Initialize Pygame here so the EyeLink calibration can use the screen
+pygame.init()
+screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+sw, sh = screen.get_size()
+
+try:
+    if TRACKER_IP is not None:
+        print(f"Connecting to EyeLink tracker at {TRACKER_IP}...")
+        tracker = pylink.EyeLink(TRACKER_IP)
+    else:
+        print("Initializing EyeLink in DUMMY MODE (No physical tracker)...")
+        # Creating a virtual tracker object to test all pylink functions
+        tracker = pylink.EyeLink(None)
+
+    tracker.openDataFile(EDF_FILENAME)
+    print(f"Data file {EDF_FILENAME} opened.")
+
+    tracker.sendCommand("file_event_filter = LEFT,RIGHT,FIXATION,SACCADE,BLINK,MESSAGE,BUTTON,INPUT")
+    tracker.sendCommand("link_event_filter = LEFT,RIGHT,FIXATION,SACCADE,BLINK,BUTTON,FIXUPDATE,INPUT")
+
+    genv = pylink.EyeLinkCoreGraphicsPyGame(tracker, screen)
+    pylink.openGraphicsEx(genv)
+    pylink.setCalibrationColors((0, 0, 0), (255, 255, 255))
+
+    print("Starting calibration setup...")
+    tracker.doTrackerSetup()
+
+except Exception as e:
+    print(f"CRITICAL ERROR: Failed to initialize pylink: {e}")
+    pygame.quit()
+    sys.exit()
+
+# =====================================================================
+# 6. EXECUTE EXPERIMENT
 # =====================================================================
 mode_str = "DEBUG" if DEBUG_MODE else "REAL"
 
-# Choose which experiment to run here:
-print(f"Starting {mode_str} experiment with {len(trial_data_auto)} automated trials...")
-run_full_experiment(trial_data_auto, display_duration_sec=DISPLAY_TIME_SEC, debug=DEBUG_MODE)
+# uncomment the line for the wanted experiment:
 
-# To run manual instead, uncomment the line below and comment the one above:
-# run_full_experiment(trial_data_manual, display_duration_sec=DISPLAY_TIME_SEC, debug=DEBUG_MODE)
+# --- Auto polygons experiment ---
+print(f"Starting {mode_str} experiment with {len(trial_data_auto)} automated trials...")
+run_full_experiment(trial_data_auto, tracker=tracker, display_duration_sec=DISPLAY_TIME_SEC, debug=DEBUG_MODE)
+
+# --- Manual polygons experiment ---
+# run_full_experiment(trial_data_manual, tracker=tracker, display_duration_sec=DISPLAY_TIME_SEC, debug=DEBUG_MODE)
+
+
+# =====================================================================
+# 7. CLEANUP AND DOWNLOAD DATA
+# =====================================================================
+if tracker is not None:
+    print("Closing data file and downloading to local computer...")
+    tracker.closeDataFile()
+
+    # Download the EDF from the Host PC to the current directory
+    tracker.receiveDataFile(EDF_FILENAME, EDF_FILENAME)
+    tracker.close()
+    print("Download complete.")
+
+pygame.quit()
+sys.exit()
