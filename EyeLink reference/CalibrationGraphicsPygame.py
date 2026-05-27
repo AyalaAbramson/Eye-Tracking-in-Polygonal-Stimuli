@@ -31,9 +31,10 @@ import sys
 import os
 
 
-#allow to disable sound, or if we failed to initialize pygame.mixer or failed to load audio file
-#continue experiment without sound.
+#  allow to disable sound, or if we failed to initialize pygame.mixer or failed to load audio file
+#  continue experiment without sound.
 DISABLE_AUDIO=False
+
 
 class CalibrationGraphics(pylink.EyeLinkCustomDisplay):
     def __init__(self, tracker, win):

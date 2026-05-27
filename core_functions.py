@@ -6,6 +6,16 @@ import numpy as np
 import pygame
 from PIL import Image, ImageDraw, ImageOps
 
+# Define basic colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GREY = (128, 128, 128)
+BLUE = (0, 0, 255)
+GREEN = (0, 255, 0)
+RED = (255, 0, 0)
+MAGENTA = (255, 0, 255)
+CYAN = (0, 255, 255)
+ORANGE = (255, 165, 0)
 
 def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, size=(800, 800),
                             texture_path=None):
@@ -131,16 +141,6 @@ def run_full_experiment(trial_list, tracker=None, display_duration_sec=3, debug=
     cross_size = 20
     clock = pygame.time.Clock()
 
-    # Define basic colors
-    WHITE = (255, 255, 255)
-    BLACK = (0, 0, 0)
-    BLUE = (0, 0, 255)
-    GREEN = (0, 255, 0)
-    RED = (255, 0, 0)
-    MAGENTA = (255, 0, 255)
-    CYAN = (0, 255, 255)
-    ORANGE = (255, 165, 0)
-
     # Define Grids:
     grid_size = int(sh * 0.8)
     start_x, end_x = center_x - (grid_size // 2), center_x + (grid_size // 2)
@@ -179,7 +179,7 @@ def run_full_experiment(trial_list, tracker=None, display_duration_sec=3, debug=
         target_point = random.choice(grid_points)
         px, py = target_point
 
-        screen.fill(WHITE)
+        screen.fill(GREY)
 
         # --DEBUG MODE-- Draw Grids on Fixation
         if debug:
@@ -248,7 +248,7 @@ def run_full_experiment(trial_list, tracker=None, display_duration_sec=3, debug=
             clock.tick(60)  # Prevents the loop from freezing the computer
 
         # EXP. STAGE 2: STIMULUS DISPLAY
-        screen.fill(WHITE)
+        screen.fill(GREY)
 
         # Convert PIL Image to Pygame Surface
         pil_image = trial["image"]
@@ -326,12 +326,15 @@ def run_full_experiment(trial_list, tracker=None, display_duration_sec=3, debug=
 
             clock.tick(60)
 
+        # manual stop
         if abort:
-            print("Experiment terminated by user.")
+            if tracker:
+                tracker.sendMessage("EXPERIMENT_ABORTED_BY_USER")
+                tracker.stopRecording()
             break
 
         # EyeLink - stop recording
-        screen.fill(WHITE)
+        screen.fill(GREY)
         pygame.display.flip()
 
         if tracker:
