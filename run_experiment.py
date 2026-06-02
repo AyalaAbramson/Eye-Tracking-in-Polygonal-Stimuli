@@ -1,10 +1,11 @@
 import os
+import csv
 import glob
+import json
 import random
 import itertools
-import pygame
-import pylink # need to install the right directory
-import sys
+from datetime import datetime
+
 # Import the backend functions from our core file
 from core_functions import generate_auto_polygon, generate_manual_polygon, run_full_experiment
 
@@ -15,18 +16,58 @@ IMAGE_DATABASE_PATH = r"C:\Users\User\Desktop\דברים\תמונות"
 IMAGE_SIZE = (800, 800)
 DISPLAY_TIME_SEC = 5
 FIXATION_TIME_SEC = 1.0
-TRIAL_REPETITIONS = 1  # Number of times each generated shape repeats
-
-# Tracker Configuration
-TRACKER_IP = None  # Change to None if testing at home without a tracker
-tracker = None # Initialize tracker as None to ensure it is accessible in the 'finally' block
-EDF_FILENAME = "Check1.EDF"  # STRICT LIMIT: Maximum 8 characters!
+TRIAL_REPETITIONS = 1    # Number of times each generated shape repeats
 
 # Toggle this to True to see grids, centers, and vertices.
 # Toggle to False for the clean, real experiment.
 DEBUG_MODE = False
 
+# --- EyeLink 1000 Plus configuration ---
+USE_EYELINK = True             # Set False for a behavioural-only test (no tracker).
+EYELINK_DUMMY_MODE = False     # True = simulate a tracker (no hardware) for testing.
+EYELINK_ADDRESS = "100.1.1.1"  # EyeLink 1000 Plus default Host PC address.
+CALIBRATION_TYPE = "HV9"       # HV3 / HV5 / HV9 / HV13.
+BINOCULAR = True               # Record both eyes.
+
+# Gaze-gated fixation parameters (only used when the tracker is connected).
+FIXATION_WINDOW_PX = 100.0     # Acceptance radius around the fixation cross.
+FIXATION_REQUIRED_MS = 300.0   # Stable dwell needed to auto-advance.
+FIXATION_MAX_WAIT_S = 10.0     # Timeout before the trial proceeds anyway.
+
+# Where all participant data is stored.
+DATA_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "raw")
+
+# Per-trial CSV column order (must match the row written in run_full_experiment).
+TRIAL_CSV_HEADER = [
+    "trial_index", "wall_clock", "trial_type",
+    "fixation_x_px", "fixation_y_px",
+    "stim_center_x_px", "stim_center_y_px",
+    "stim_top_left_x_px", "stim_top_left_y_px",
+    "stim_w_px", "stim_h_px",
+    "concave_idx",
+    "fixation_outcome", "fixation_ts_s",
+    "stim_on_ts_s", "stim_off_ts_s", "stim_duration_s",
+    "polygon_points_imgspace", "polygon_base_points_imgspace",
+    "aborted",
+]
+
 random.seed(42)
+
+
+def prompt_participant_info():
+    """Collect participant metadata from the console before the window opens."""
+    print("\n" + "=" * 55)
+    print(" Polygon center-bias experiment - participant intake")
+    print("=" * 55)
+    participant_id = input("Participant ID (e.g. P01): ").strip() or "P00"
+    age = input("Age (optional): ").strip()
+    gender = input("Gender (optional): ").strip()
+    return {
+        "participant_id": participant_id,
+        "age": age or "NA",
+        "gender": gender or "NA",
+        "timestamp": datetime.now().isoformat(),
+    }
 
 # =====================================================================
 # 2. GATHER IMAGES
@@ -50,9 +91,7 @@ concave_options = [2]
 concave_ratio = [0.2]
 
 # Multiply by TRIAL_REPETITIONS
-base_auto_combos = list(
-    itertools.product(auto_polygon_types, stretch_steps, rotation_options, fill_options, concave_options,
-                      concave_ratio))
+base_auto_combos = list(itertools.product(auto_polygon_types, stretch_steps, rotation_options, fill_options, concave_options, concave_ratio))
 auto_combos = base_auto_combos * TRIAL_REPETITIONS
 random.shuffle(auto_combos)
 
@@ -94,88 +133,118 @@ for (radii, angles), rot, is_filled in manual_combos:
     })
 
 # =====================================================================
-# 5. INITIALIZE PYGAME AND EYELINK
+# 5. EXECUTE EXPERIMENT
 # =====================================================================
-# Initialize Pygame here so the EyeLink calibration can use the screen
-pygame.init()
-screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
-sw, sh = screen.get_size()
+# Choose which trial list to run: trial_data_auto or trial_data_manual.
+ACTIVE_TRIALS = trial_data_auto
 
-try:
-    if TRACKER_IP is not None:
-        print(f"Connecting to EyeLink tracker at {TRACKER_IP}...")
-        tracker = pylink.EyeLink(TRACKER_IP)
-    else:
-        print("Initializing EyeLink in DUMMY MODE (No physical tracker)...")
-        # Creating a virtual tracker object to test all pylink functions
-        tracker = pylink.EyeLink(None)
-
-    tracker.openDataFile(EDF_FILENAME)
-    print(f"Data file {EDF_FILENAME} opened.")
-
-    # file: data saved to EDF
-    # link: data sent to tracker in real-time
-    # sample data suitable for EyeLink 1000 PLUS version
-    tracker.sendCommand("file_event_filter = LEFT,RIGHT,FIXATION,SACCADE,BLINK,MESSAGE,BUTTON,INPUT")
-    tracker.sendCommand("file_sample_data = LEFT,RIGHT,GAZE,HREF,RAW,AREA,HTARGET,GAZERES,BUTTON,STATUS,INPUT")
-    tracker.sendCommand("link_event_filter = LEFT,RIGHT,FIXATION,SACCADE,BLINK,BUTTON,FIXUPDATE,INPUT")
-    tracker.sendCommand("link_sample_data = LEFT,RIGHT,GAZE,GAZERES,AREA,HTARGET,STATUS,INPUT")
-    tracker.sendCommand("sample_rate 1000")
-
-    # calibration definition
-    tracker.sendCommand("calibration_type = HV9")
-    tracker.sendCommand(f"screen_pixel_coords = 0 0 {sw - 1} {sh - 1}")
-
-    pylink.openGraphics()
-    pylink.setCalibrationColors((128, 128, 128), (0, 0, 0))
-
-    print("Starting calibration setup...")
-    tracker.doTrackerSetup()
-
-except Exception as e:
-    print(f"CRITICAL ERROR: Failed to initialize pylink: {e}")
-    pygame.quit()
-    sys.exit()
-
-# =====================================================================
-# 6. EXECUTE EXPERIMENT
-# =====================================================================
 mode_str = "DEBUG" if DEBUG_MODE else "REAL"
 
-# uncomment the line for the wanted experiment:
+# --- Participant intake (console prompt) ---
+participant_info = prompt_participant_info()
+participant_id = participant_info["participant_id"]
 
+# --- Build the per-session data folder ---
+#   data/raw/participant_<ID>/session_<timestamp>/{edf, trials.csv, metadata.json}
+session_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+session_root = os.path.join(
+    DATA_ROOT, f"participant_{participant_id}", f"session_{session_stamp}"
+)
+edf_dir = os.path.join(session_root, "edf")
+os.makedirs(edf_dir, exist_ok=True)
 
-print(f"Starting {mode_str} experiment")
+trial_csv_path = os.path.join(session_root, "trials.csv")
+metadata_path = os.path.join(session_root, "session_metadata.json")
+
+# --- Optional EyeLink setup ---
+tracker = None
+exp_clock = None
+screen = None
+edf_name = None
+
+if USE_EYELINK:
+    import pygame
+    import eyelink_interface as eli
+
+    # Determine the full-screen resolution to configure the tracker with.
+    pygame.init()
+    _info = pygame.display.Info()
+    screen_w, screen_h = _info.current_w, _info.current_h
+
+    print(f"\nConnecting to EyeLink at '{EYELINK_ADDRESS}' "
+          f"(dummy={EYELINK_DUMMY_MODE}) ...")
+    tracker = eli.connect_eyelink(address=EYELINK_ADDRESS, dummy_mode=EYELINK_DUMMY_MODE)
+    exp_clock = eli.ExpClock()
+
+    edf_name = eli.setup_edf(tracker, participant_id, edf_dir)
+    print(f"EDF opened on host: {edf_name}")
+
+    eli.configure_tracker(tracker, screen_w, screen_h,
+                          calibration_type=CALIBRATION_TYPE, binocular=BINOCULAR)
+
+    # Open pylink's built-in calibration graphics; reuse the surface for stimuli.
+    screen = eli.open_calibration_graphics(tracker, screen_w, screen_h)
+
+    print("Starting calibration. In the camera-setup screen: "
+          "'C' calibrate, 'V' validate, 'O'/Enter to accept and begin.")
+    calib = eli.do_calibration(tracker, exp_clock)
+    if calib["result"] == "ABORT":
+        print("Calibration aborted - closing without running trials.")
+        eli.close_tracker(tracker, edf_name, os.path.join(edf_dir, edf_name), exp_clock)
+        raise SystemExit(0)
+
+# --- Write session metadata ---
+with open(metadata_path, "w", encoding="utf-8") as f:
+    json.dump({
+        "participant": participant_info,
+        "session_stamp": session_stamp,
+        "mode": mode_str,
+        "n_trials": len(ACTIVE_TRIALS),
+        "trial_set": "auto" if ACTIVE_TRIALS is trial_data_auto else "manual",
+        "display_time_sec": DISPLAY_TIME_SEC,
+        "image_size": list(IMAGE_SIZE),
+        "use_eyelink": USE_EYELINK,
+        "eyelink": {
+            "dummy_mode": EYELINK_DUMMY_MODE,
+            "address": EYELINK_ADDRESS,
+            "calibration_type": CALIBRATION_TYPE,
+            "binocular": BINOCULAR,
+            "edf_name": edf_name,
+            "fixation_window_px": FIXATION_WINDOW_PX,
+            "fixation_required_ms": FIXATION_REQUIRED_MS,
+            "fixation_max_wait_s": FIXATION_MAX_WAIT_S,
+        },
+    }, f, indent=2)
+print(f"Session metadata written to {metadata_path}")
+
+# --- Run the experiment, logging one CSV row per trial ---
+print(f"\nStarting {mode_str} experiment with {len(ACTIVE_TRIALS)} trials...")
 try:
-    # --- Auto polygons experiment ---
-    run_full_experiment(trial_data_auto, tracker=tracker, display_duration_sec=DISPLAY_TIME_SEC, debug=DEBUG_MODE)
-
-    # --- Manual polygons experiment ---
-    # run_full_experiment(trial_data_manual, tracker=tracker, display_duration_sec=DISPLAY_TIME_SEC, debug=DEBUG_MODE)
-
+    with open(trial_csv_path, "w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(TRIAL_CSV_HEADER)
+        run_full_experiment(
+            ACTIVE_TRIALS,
+            display_duration_sec=DISPLAY_TIME_SEC,
+            debug=DEBUG_MODE,
+            tracker=tracker,
+            exp_clock=exp_clock,
+            screen=screen,
+            trial_writer=writer,
+            trial_file=csv_file,
+            fixation_window_px=FIXATION_WINDOW_PX,
+            fixation_required_ms=FIXATION_REQUIRED_MS,
+            fixation_max_wait_s=FIXATION_MAX_WAIT_S,
+        )
+    print(f"Trial data saved to {trial_csv_path}")
+except KeyboardInterrupt:
+    # Ctrl+C: rows already written are flushed per-trial, so data is preserved.
+    print("\nExperiment interrupted (Ctrl+C). Saving collected data...")
 finally:
-    # closes edf file if the experiment crashed
-    if tracker is not None:
-        try:
-            tracker.stopRecording()
-            tracker.closeDataFile()
-            tracker.receiveDataFile(EDF_FILENAME, EDF_FILENAME)
-            tracker.close()
-            print("EDF file saved and tracker connection closed safely.")
-        except Exception as e:
-            print(f"Error during cleanup: {e}")
+    # --- Always retrieve the EDF and close the tracker, even on error ---
+    if USE_EYELINK and tracker is not None:
+        import eyelink_interface as eli
+        eli.close_tracker(tracker, edf_name, os.path.join(edf_dir, edf_name), exp_clock)
+        print(f"EDF saved to {os.path.join(edf_dir, edf_name)}")
 
-# =====================================================================
-# 7. CLEANUP AND DOWNLOAD DATA
-# =====================================================================
-if tracker is not None:
-    print("Closing data file and downloading to local computer...")
-    tracker.closeDataFile()
-
-    # Download the EDF from the Host PC to the current directory
-    tracker.receiveDataFile(EDF_FILENAME, EDF_FILENAME)
-    tracker.close()
-    print("Download complete.")
-
-pygame.quit()
-sys.exit()
+print(f"\nExperiment complete. All data in: {session_root}")

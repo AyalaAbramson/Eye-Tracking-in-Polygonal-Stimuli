@@ -6,16 +6,6 @@ import numpy as np
 import pygame
 from PIL import Image, ImageDraw, ImageOps
 
-# Define basic colors
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GREY = (128, 128, 128)
-BLUE = (0, 0, 255)
-GREEN = (0, 255, 0)
-RED = (255, 0, 0)
-MAGENTA = (255, 0, 255)
-CYAN = (0, 255, 255)
-ORANGE = (255, 165, 0)
 
 def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, size=(800, 800),
                             texture_path=None):
@@ -125,28 +115,69 @@ def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, targ
     return final_img, points, base_points
 
 
-def run_full_experiment(trial_list, tracker=None, display_duration_sec=3, debug=False):
+def run_full_experiment(trial_list, display_duration_sec=3, debug=False,
+                        tracker=None, exp_clock=None, screen=None,
+                        trial_writer=None, trial_file=None, fixation_window_px=100.0,
+                        fixation_required_ms=300.0, fixation_max_wait_s=10.0):
     """
     Handles the full-screen display loop using Pygame.
-    Handles connection to EyeLink.
     If debug=True, draws technical overlays (grids, vertices) over the display.
-    """
 
-    # Setup fullscreen window
-    screen = pygame.display.get_surface()
+    EyeLink integration (all optional - omit to run a pure behavioural session):
+        tracker        : connected pylink.EyeLink object. When provided, each
+                         trial records to the EDF, sends Data-Viewer messages,
+                         and the fixation screen is gaze-gated.
+        exp_clock      : eyelink_interface.ExpClock for consistent timestamps.
+        screen         : pre-opened pygame display surface (created by pylink's
+                         openGraphics during calibration). If None, a fullscreen
+                         window is created here (behavioural-only mode).
+        trial_writer   : csv.writer (or None). One row is written per trial.
+        trial_file     : the open CSV file handle backing trial_writer. If
+                         given, it is flushed (and fsync'd) after every trial so
+                         data survives a hard/manual termination of the process.
+        fixation_*     : gaze-gating parameters passed to wait_for_fixation_gaze.
+
+    Returns
+    -------
+    bool
+        True if the experiment finished normally, False if the experimenter
+        aborted (Q/ESC).
+    """
+    import pygame
+    from datetime import datetime
+
+    # EyeLink helpers are only needed when a tracker is attached.
+    use_tracker = tracker is not None
+    if use_tracker:
+        import eyelink_interface as eli
+        if exp_clock is None:
+            exp_clock = eli.ExpClock()
+
+    pygame.init()
+
+    # 1. Setup fullscreen window.
+    # When a tracker is attached, pylink.openGraphics has already created the
+    # fullscreen display; reuse that surface. Otherwise create our own.
+    if screen is None:
+        screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
     sw, sh = screen.get_size()
     center_x, center_y = sw // 2, sh // 2
 
-    # Size of the fixation cross
-    cross_size = 20
-    clock = pygame.time.Clock()
+    # Define basic colors
+    WHITE = (255, 255, 255)
+    BLACK = (0, 0, 0)
+    BLUE = (0, 0, 255)
+    GREEN = (0, 255, 0)
+    RED = (255, 0, 0)
+    MAGENTA = (255, 0, 255)
+    CYAN = (0, 255, 255)
+    ORANGE = (255, 165, 0)
 
-    # Define Grids:
+    # 2. Define Grids
     grid_size = int(sh * 0.8)
     start_x, end_x = center_x - (grid_size // 2), center_x + (grid_size // 2)
     start_y, end_y = center_y - (grid_size // 2), center_y + (grid_size // 2)
 
-    # Grid_points for calibration between trials
     grid_points = list(itertools.product(
         np.linspace(start_x, end_x, 3, dtype=int),
         np.linspace(start_y, end_y, 3, dtype=int)
@@ -156,32 +187,47 @@ def run_full_experiment(trial_list, tracker=None, display_duration_sec=3, debug=
     m_start_x, m_end_x = center_x - (mini_grid_size // 2), center_x + (mini_grid_size // 2)
     m_start_y, m_end_y = center_y - (mini_grid_size // 2), center_y + (mini_grid_size // 2)
 
-    # Mini_grid_points for polygon centers
     mini_grid_points = list(itertools.product(
         np.linspace(m_start_x, m_end_x, 3, dtype=int),
         np.linspace(m_start_y, m_end_y, 3, dtype=int)
     ))
 
-    # Each iteration (trial) is a new polygon
-    # trial_idx is used for saving TRIALID
-    for trial_idx, trial in enumerate(trial_list):
-        # EyeLink set-up before trial starts
-        if tracker:
-            tracker.sendMessage(f"TRIALID {trial_idx}")
-            num_points = len(trial.get("points", []))
-            tracker.sendMessage(f"!V TRIAL_VAR num_vertices {num_points}")
-            tracker.setOfflineMode()
-            pygame.time.wait(50)
-            tracker.startRecording(1, 1, 1, 1)
-            pygame.time.wait(100)
+    cross_size = 20
+    clock = pygame.time.Clock()
 
-        # EXP. STAGE 1: FIXATION SCREEN
+    if use_tracker:
+        tracker.sendMessage(f"SESSION_START n_trials={len(trial_list)}")
+
+    finished_normally = True
+
+    for trial_index, trial in enumerate(trial_list, start=1):
+        # ==========================================
+        # STAGE 1: FIXATION SCREEN
+        # ==========================================
         target_point = random.choice(grid_points)
         px, py = target_point
 
-        screen.fill(GREY)
+        # Per-trial recording + Data Viewer trial markers.
+        ts_trial_start = exp_clock.getTime() if use_tracker else None
+        if use_tracker:
+            tracker.sendMessage(f"TRIALID {trial_index}")
+            eli.start_recording(tracker, exp_clock)
+            tracker.sendMessage(
+                f"TRIAL_START {ts_trial_start:.3f} index={trial_index} "
+                f"type={trial.get('type')}"
+            )
+            tracker.sendMessage(f"!V TRIAL_VAR trial_index {trial_index}")
+            tracker.sendMessage(f"!V TRIAL_VAR trial_type {trial.get('type')}")
+            tracker.sendMessage(f"!V TRIAL_VAR fixation_x_px {px}")
+            tracker.sendMessage(f"!V TRIAL_VAR fixation_y_px {py}")
+            c_idx_var = trial.get("concave_idx")
+            tracker.sendMessage(
+                f"!V TRIAL_VAR concave_idx {c_idx_var if c_idx_var is not None else 'NA'}"
+            )
 
-        # --DEBUG MODE-- Draw Grids on Fixation
+        screen.fill(WHITE)
+
+        # Draw Grids on Fixation (ONLY IN DEBUG MODE)
         if debug:
             for gx, gy in grid_points:
                 pygame.draw.circle(screen, BLUE, (gx, gy), 5)
@@ -194,61 +240,51 @@ def run_full_experiment(trial_list, tracker=None, display_duration_sec=3, debug=
 
         pygame.display.flip()
 
-        # Wait for fixation / SPACE to continue
-        waiting_for_fixation = True
         abort = False
+        fixation_outcome = "manual"  # default for behavioural-only mode
+        fixation_ts = None
 
-        # --- Fixation Parameters ---
-        fixation_radius = 100  # Allowed distance (in pixels) from the cross center
-        fixation_time_ms = 300  # How long they must look continuously (milliseconds)
-        current_fixation_start = None
-
-        while waiting_for_fixation:
-            # Manual handling
-            for event in pygame.event.get():
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_SPACE:
-                        waiting_for_fixation = False
-                    elif event.key == pygame.K_q or event.key == pygame.K_ESCAPE:
+        if use_tracker:
+            # Gaze-gated: auto-advance once the participant holds the cross,
+            # with SPACE = manual accept and Q/ESC = abort.
+            fixation_outcome, fixation_ts = eli.wait_for_fixation_gaze(
+                tracker, px, py, exp_clock,
+                fixation_window_px=fixation_window_px,
+                required_duration_ms=fixation_required_ms,
+                max_wait_s=fixation_max_wait_s,
+                pygame_events_fn=pygame.event.get,
+            )
+            if fixation_outcome == eli.FIXATION_ABORT:
+                abort = True
+            # On timeout we still proceed (logged), so partial data is usable.
+        else:
+            # Behavioural-only: wait for SPACE to continue, or Q/ESC to abort.
+            waiting_for_fixation = True
+            while waiting_for_fixation:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
                         abort = True
                         waiting_for_fixation = False
-            if abort:
-                print("Experiment terminated by user.")
-                break
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_SPACE:
+                            waiting_for_fixation = False
+                        elif event.key == pygame.K_q or event.key == pygame.K_ESCAPE:
+                            abort = True
+                            waiting_for_fixation = False
+                clock.tick(60)  # Prevents the loop from freezing the computer
 
-            # EyeLink gaze check
-            if tracker and tracker.isConnected():
-                sample = tracker.getNewestSample()
-                if sample is not None:
-                    # Determine which eye is being tracked (0=Left, 1=Right, 2=Binocular)
-                    eye_used = tracker.eyeAvailable()
-                    if eye_used == 1:
-                        gaze = sample.getRightEye().getGaze()
-                    else:
-                        gaze = sample.getLeftEye().getGaze()
-                    gaze_x, gaze_y = gaze[0], gaze[1]
+        if abort:
+            print("Experiment terminated by user.")
+            if use_tracker:
+                tracker.sendMessage("TRIAL_RESULT ABORT")
+                eli.stop_recording(tracker, exp_clock)
+            finished_normally = False
+            break
 
-                    # EyeLink returns -32768.0 when the eye is lost (e.g., blinking)
-                    if gaze_x != -32768.0 and gaze_y != -32768.0:
-                        # Calculate distance between current gaze and target cross (px, py)
-                        distance = ((gaze_x - px) ** 2 + (gaze_y - py) ** 2) ** 0.5
-
-                        if distance <= fixation_radius:  # User is looking at the cross
-                            if current_fixation_start is None:
-                                current_fixation_start = pygame.time.get_ticks()  # Start timer
-                            else:
-                                elapsed_time = pygame.time.get_ticks() - current_fixation_start
-                                if elapsed_time >= fixation_time_ms:
-                                    waiting_for_fixation = False  # Success! Break the loop
-                        else:
-                            current_fixation_start = None  # Looked away, reset timer
-                    else:
-                        current_fixation_start = None  # Blinked, reset timer
-
-            clock.tick(60)  # Prevents the loop from freezing the computer
-
-        # EXP. STAGE 2: STIMULUS DISPLAY
-        screen.fill(GREY)
+        # ==========================================
+        # STAGE 2: STIMULUS DISPLAY
+        # ==========================================
+        screen.fill(WHITE)
 
         # Convert PIL Image to Pygame Surface
         pil_image = trial["image"]
@@ -260,14 +296,19 @@ def run_full_experiment(trial_list, tracker=None, display_duration_sec=3, debug=
         stim_px, stim_py = random.choice(mini_grid_points)
         w, h = size
 
+        if use_tracker:
+            # Tell Data Viewer where the stimulus image will sit on screen.
+            tracker.sendMessage(f"!V TRIAL_VAR stim_x_px {stim_px}")
+            tracker.sendMessage(f"!V TRIAL_VAR stim_y_px {stim_py}")
+
         # Calculate top-left coordinates to center the image perfectly
         top_left_x = stim_px - (w // 2)
         top_left_y = stim_py - (h // 2)
 
-        # Draw the image onto the screen
+        # Blit (draw) the image onto the screen
         screen.blit(py_image, (top_left_x, top_left_y))
 
-        # --DEBUG MODE-- Draw Overlays on Stimulus
+        # Draw Overlays on Stimulus (ONLY IN DEBUG MODE)
         if debug:
             for gx, gy in grid_points:
                 pygame.draw.circle(screen, BLUE, (gx, gy), 5)
@@ -298,15 +339,11 @@ def run_full_experiment(trial_list, tracker=None, display_duration_sec=3, debug=
                     sx, sy = int(cx_img + top_left_x), int(cy_img + top_left_y)
                     pygame.draw.circle(screen, CYAN, (sx, sy), 14, 3)
 
-        # Polygon display
         pygame.display.flip()
 
-        # EyeLink stimulus time marker
-        if tracker:
-            # Mark the exact moment the polygon appeared on the screen
-            tracker.sendMessage("STIM_ON")
-            tracker.sendMessage("!V CLEAR 255 255 255")
-            tracker.sendMessage(f"!V TARGET_POS polygon {stim_px}, {stim_py} 1 0")
+        ts_stim_on = exp_clock.getTime() if use_tracker else None
+        if use_tracker:
+            tracker.sendMessage(f"STIM_ON {ts_stim_on:.3f}")
 
         # Display for duration, but allow breaking out early with Q/ESC
         start_ticks = pygame.time.get_ticks()
@@ -315,7 +352,10 @@ def run_full_experiment(trial_list, tracker=None, display_duration_sec=3, debug=
 
         while stimulus_running:
             for event in pygame.event.get():
-                if event.type == pygame.KEYDOWN:
+                if event.type == pygame.QUIT:
+                    abort = True
+                    stimulus_running = False
+                elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_q or event.key == pygame.K_ESCAPE:
                         abort = True
                         stimulus_running = False
@@ -326,24 +366,54 @@ def run_full_experiment(trial_list, tracker=None, display_duration_sec=3, debug=
 
             clock.tick(60)
 
-        # manual stop
+        ts_stim_off = exp_clock.getTime() if use_tracker else None
+
+        # ==========================================
+        # STAGE 3: END-OF-TRIAL DATA DOCUMENTATION
+        # ==========================================
+        if use_tracker:
+            tracker.sendMessage(f"STIM_OFF {ts_stim_off:.3f}")
+            tracker.sendMessage(f"TRIAL_RESULT {'ABORT' if abort else 'OK'}")
+            eli.stop_recording(tracker, exp_clock)
+
+        if trial_writer is not None:
+            points = trial.get("points") or []
+            base_points = trial.get("base_points") or []
+            trial_writer.writerow([
+                trial_index,
+                datetime.now().isoformat(),
+                trial.get("type"),
+                px, py,                                  # fixation cross location
+                stim_px, stim_py,                        # stimulus centre location
+                top_left_x, top_left_y,                  # stimulus top-left on screen
+                w, h,                                    # stimulus size
+                trial.get("concave_idx"),
+                fixation_outcome,
+                f"{fixation_ts:.4f}" if fixation_ts is not None else "",
+                f"{ts_stim_on:.4f}" if ts_stim_on is not None else "",
+                f"{ts_stim_off:.4f}" if ts_stim_off is not None else "",
+                display_duration_sec,
+                # Polygon geometry (image-space coords) for offline analysis.
+                ";".join(f"{x:.2f},{y:.2f}" for x, y in points),
+                ";".join(f"{x:.2f},{y:.2f}" for x, y in base_points),
+                int(abort),
+            ])
+            # Flush to disk every trial so data survives manual/hard termination.
+            if trial_file is not None:
+                trial_file.flush()
+                try:
+                    os.fsync(trial_file.fileno())
+                except (OSError, ValueError):
+                    pass
+
         if abort:
-            if tracker:
-                tracker.sendMessage("EXPERIMENT_ABORTED_BY_USER")
-                tracker.stopRecording()
+            print("Experiment terminated by user.")
+            finished_normally = False
             break
 
-        # EyeLink - stop recording
-        screen.fill(GREY)
-        pygame.display.flip()
-
-        if tracker:
-            # Mark the exact moment the polygon disappeared
-            tracker.sendMessage("STIM_OFF")
-            # Tell the Data Viewer this trial was completed successfully (0)
-            tracker.sendMessage("TRIAL_RESULT 0")
-            # Stop the camera recording to save file space
-            tracker.stopRecording()
-
     # Safely close Pygame window at the end
+    if use_tracker:
+        tracker.sendMessage(f"SESSION_FINISHED normal={int(finished_normally)}")
+
     pygame.quit()
+    return finished_normally
