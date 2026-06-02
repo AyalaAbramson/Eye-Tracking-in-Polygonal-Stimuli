@@ -198,6 +198,13 @@ def open_calibration_graphics(tracker, screen_width_px, screen_height_px):
     # and wires it into pylink for camera-setup / calibration / drift display.
     pylink.openGraphics((screen_width_px, screen_height_px), 32)
 
+    # Match the experiment background: mid-grey screen with a black calibration
+    # target, so luminance stays constant across calibration/validation/trials.
+    try:
+        pylink.setCalibrationColors((0, 0, 0), (128, 128, 128))  # (target, background)
+    except Exception:
+        pass
+
     # Use a clear beep set for calibration feedback (target onset, good, error).
     try:
         pylink.setCalibrationSounds("", "", "")

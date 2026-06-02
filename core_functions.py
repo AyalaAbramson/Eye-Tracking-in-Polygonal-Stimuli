@@ -6,6 +6,10 @@ import numpy as np
 import pygame
 from PIL import Image, ImageDraw, ImageOps
 
+# Uniform mid-grey background used everywhere (stimulus images, trial screen,
+# and EyeLink calibration/validation) so luminance is constant throughout.
+BG_GREY = (128, 128, 128)
+
 
 def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, size=(800, 800),
                             texture_path=None):
@@ -36,7 +40,7 @@ def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, siz
         points.append((x, y))
 
     mask_draw.polygon(points, fill=255)
-    final_img = Image.new("RGB", size, "white")
+    final_img = Image.new("RGB", size, BG_GREY)
 
     has_texture = False
     if texture_path and os.path.exists(texture_path):
@@ -96,7 +100,7 @@ def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, targ
         points.append((x, y))
 
     mask_draw.polygon(points, fill=255)
-    final_img = Image.new("RGB", size, "white")
+    final_img = Image.new("RGB", size, BG_GREY)
 
     has_texture = False
     if texture_path and os.path.exists(texture_path):
@@ -165,6 +169,7 @@ def run_full_experiment(trial_list, display_duration_sec=3, debug=False,
 
     # Define basic colors
     WHITE = (255, 255, 255)
+    GREY = BG_GREY
     BLACK = (0, 0, 0)
     BLUE = (0, 0, 255)
     GREEN = (0, 255, 0)
@@ -225,7 +230,7 @@ def run_full_experiment(trial_list, display_duration_sec=3, debug=False,
                 f"!V TRIAL_VAR concave_idx {c_idx_var if c_idx_var is not None else 'NA'}"
             )
 
-        screen.fill(WHITE)
+        screen.fill(GREY)
 
         # Draw Grids on Fixation (ONLY IN DEBUG MODE)
         if debug:
@@ -284,7 +289,7 @@ def run_full_experiment(trial_list, display_duration_sec=3, debug=False,
         # ==========================================
         # STAGE 2: STIMULUS DISPLAY
         # ==========================================
-        screen.fill(WHITE)
+        screen.fill(GREY)
 
         # Convert PIL Image to Pygame Surface
         pil_image = trial["image"]
