@@ -59,7 +59,7 @@ def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, siz
     return final_img, points, None
 
 
-def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, target_idx=None,
+def generate_auto_polygon(num_vertices=None, step=0,  rotation_deg=0, target_idx=None,
                           concave_idx=None, concave_ratio=0, size=(800, 800), texture_path=None):
     """
     Generates a polygon with a specific concave vertex and a target vertex.
@@ -90,8 +90,13 @@ def generate_auto_polygon(num_vertices=None, stretch_amt=0, rotation_deg=0, targ
             concave_depth = base_radius * concave_ratio
             current_radius = flat_edge_radius - concave_depth
         elif target_idx is not None and i == target_idx:
-            flat_edge_radius = base_radius * math.cos(2 * math.pi / num_vertices)
-            current_radius = flat_edge_radius + stretch_amt
+            if step < 0:
+                current_radius = 0  # Fully collapsed (point)
+            else:
+                flat_edge_radius = base_radius * math.cos(2 * math.pi / num_vertices)
+                delta = base_radius - flat_edge_radius 
+                stretch_amt = delta * step
+                current_radius = flat_edge_radius + stretch_amt
         else:
             current_radius = base_radius
 
