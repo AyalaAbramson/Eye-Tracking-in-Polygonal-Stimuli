@@ -1,0 +1,4 @@
+timestamp,participant_id,part,mini_block,calibration_start_time,calibration_end_time,calibration_result,calibration_error_deg,validation_result,validation_error_avg_deg,validation_error_max_deg,n_trials,n_trials_completed,n_drift_failures,n_recalibrations_within_block,memory_response,memory_correct,memory_rt_ms,break_duration_actual_s,block_start_time,block_end_time,block_duration_s
+2026-01-18T10:11:11.846773,P06,A,7,14.373007399961352,45.57065219990909,PASS,,PASS,,,39,39,0,,old,False,2249.0738998167217,61.464202399831265,14.372653900180012,415.2086368999444,400.8359829997644
+2026-01-18T10:19:11.297782,P06,A,8,415.2131453002803,513.7720154998824,PASS,,PASS,,,39,39,0,,new,True,1918.9201998524368,61.448145100381225,415.2127868998796,894.6596539001912,479.4468670003116
+2026-01-18T10:26:37.615902,P06,A,9,894.6681484999135,1032.755053400062,PASS,,PASS,,,39,39,0,,new,False,1818.9428001642227,0.0,894.6677911002189,1340.9776949002407,446.30990380002186

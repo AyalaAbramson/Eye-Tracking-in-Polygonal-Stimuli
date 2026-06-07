@@ -1,0 +1,4 @@
+timestamp,participant_id,part,mini_block,probe_image_id,probe_image_path,probe_duration_s,is_old,response,response_time_ms,correct,probe_start_time,probe_end_time
+2026-01-28T14:19:45.894166,P28,A,4,A_Satelite_023,data/raw/stimuli/CAT2000/Satelite/023.jpg,3.0,True,old,6743.075300008059,True,1092.7150952001102,1104.630113699939
+2026-01-28T14:25:53.881990,P28,A,5,A_Satelite_113,data/raw/stimuli/CAT2000/Satelite/113.jpg,3.0,True,old,3714.0076998621225,True,1463.7373784999363,1472.621840200387
+2026-01-28T14:32:04.570645,P28,A,6,A_MEM_Sketch_031,data/raw/stimuli/CAT2000/Sketch/031.jpg,3.0,False,new,2278.79700018093,True,1835.7974864002317,1843.307463800069

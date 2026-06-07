@@ -1,0 +1,22 @@
+# Core dependencies for center_bias_exp
+
+# Data handling
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Configuration
+pyyaml>=6.0
+
+# PsychoPy (stimulus presentation)
+psychopy>=2023.2.0
+
+# SR Research EyeLink (eye tracking)
+# Note: Install separately from SR Research
+# pip install pylink-square
+# or use the official SR Research installer
+
+# Image processing (for polygon masking)
+pillow>=10.0.0
+
+# Optional: for better random number generation
+# (numpy.random.default_rng is built-in, but this ensures compatibility)

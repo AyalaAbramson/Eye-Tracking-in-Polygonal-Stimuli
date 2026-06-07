@@ -1,0 +1,32 @@
+case_group,closest_center,description,n_fixations,percentage,total_fixations
+baseline,com,Baseline polygons (control conditions),355,100.0,355
+allfar_spectrum,com,All-far spectrum (convex -> intermediate -> concave),131,37.110481586402265,353
+allfar_spectrum,icc,All-far spectrum (convex -> intermediate -> concave),106,30.02832861189802,353
+allfar_spectrum,chc,All-far spectrum (convex -> intermediate -> concave),79,22.379603399433428,353
+allfar_spectrum,bbc,All-far spectrum (convex -> intermediate -> concave),37,10.48158640226629,353
+pair_C1,com,Pair separation C1: BBC vs (CHC+ICC),162,46.15384615384615,351
+pair_C1,bbc,Pair separation C1: BBC vs (CHC+ICC),79,22.507122507122507,351
+pair_C1,icc,Pair separation C1: BBC vs (CHC+ICC),72,20.51282051282051,351
+pair_C1,chc,Pair separation C1: BBC vs (CHC+ICC),38,10.826210826210826,351
+pair_C2,com,Pair separation C2: CHC vs (BBC+ICC),162,45.63380281690141,355
+pair_C2,chc,Pair separation C2: CHC vs (BBC+ICC),85,23.943661971830984,355
+pair_C2,icc,Pair separation C2: CHC vs (BBC+ICC),72,20.281690140845072,355
+pair_C2,bbc,Pair separation C2: CHC vs (BBC+ICC),36,10.140845070422536,355
+pair_C3,icc,Pair separation C3: ICC vs (CHC+BBC),204,57.79036827195468,353
+pair_C3,com,Pair separation C3: ICC vs (CHC+BBC),78,22.096317280453256,353
+pair_C3,chc,Pair separation C3: ICC vs (CHC+BBC),37,10.48158640226629,353
+pair_C3,bbc,Pair separation C3: ICC vs (CHC+BBC),34,9.631728045325778,353
+isolated_com,com,Isolated COM (3 polygons),160,45.07042253521127,355
+isolated_com,icc,Isolated COM (3 polygons),110,30.985915492957744,355
+isolated_com,bbc,Isolated COM (3 polygons),84,23.661971830985916,355
+isolated_com,chc,Isolated COM (3 polygons),1,0.28169014084507044,355
+isolated_bbc,icc,Isolated BBC (3 polygons),164,46.06741573033708,356
+isolated_bbc,bbc,Isolated BBC (3 polygons),111,31.179775280898873,356
+isolated_bbc,chc,Isolated BBC (3 polygons),81,22.752808988764045,356
+isolated_chc,chc,Isolated CHC (3 polygons),151,42.77620396600567,353
+isolated_chc,icc,Isolated CHC (3 polygons),116,32.86118980169972,353
+isolated_chc,com,Isolated CHC (3 polygons),86,24.362606232294617,353
+isolated_icc,com,Isolated ICC (3 polygons),166,46.49859943977591,357
+isolated_icc,icc,Isolated ICC (3 polygons),80,22.408963585434176,357
+isolated_icc,chc,Isolated ICC (3 polygons),75,21.008403361344538,357
+isolated_icc,bbc,Isolated ICC (3 polygons),36,10.084033613445378,357

@@ -1,0 +1,10 @@
+is_old,mini_block,part,probe_duration_s,probe_image_id,probe_image_path
+False,1,B,3.0,B_MEM_Random_039,data/raw/stimuli/CAT2000/Random/039.jpg
+False,2,B,3.0,B_MEM_Object_151,data/raw/stimuli/CAT2000/Object/151.jpg
+True,3,B,3.0,B_Fractal_083,data/raw/stimuli/CAT2000/Fractal/083.jpg
+True,4,B,3.0,B_Object_125,data/raw/stimuli/CAT2000/Object/125.jpg
+True,5,B,3.0,B_OutdoorNatural_111,data/raw/stimuli/CAT2000/OutdoorNatural/111.jpg
+False,6,B,3.0,B_MEM_Satelite_191,data/raw/stimuli/CAT2000/Satelite/191.jpg
+True,7,B,3.0,B_Sketch_169,data/raw/stimuli/CAT2000/Sketch/169.jpg
+False,8,B,3.0,B_MEM_OutdoorNatural_171,data/raw/stimuli/CAT2000/OutdoorNatural/171.jpg
+True,9,B,3.0,B_Object_011,data/raw/stimuli/CAT2000/Object/011.jpg

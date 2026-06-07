@@ -1,0 +1,168 @@
+
+====================================================================================================
+DATA QUALITY VALIDATION REPORT
+Generated: 2026-01-17T16:38:38.753415
+====================================================================================================
+
+SUMMARY
+-------
+Total sessions validated: 9
+Sessions with issues: 9
+  - OK: 0
+  - WARNING: 0
+  - ERROR: 9
+
+
+OVERALL STATISTICS
+------------------
+Total trials across all sessions: 1173
+Overall fixation success rate: 99.1%
+Mean fixation time: 3.08s
+P95 fixation time: 13.55s
+
+
+PER-SESSION DETAILS
+====================================================================================================
+
+[1] P01 Part A - ERROR
+    Path: data\raw\participant_P01\part_A\session_20260114_224721
+    Trials: 39
+    Issues (7):
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_intermediate_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY DATA: 312 NaN values across 8 columns
+      - [Trial Completion] INCOMPLETE SESSION: Only 39/351 trials (11.1%)
+      - [Calibration Quality] WARNING: No validation RMS values logged - cannot assess calibration quality
+      - [Calibration Quality]   Recommendation: Manually check validation from EyeLink Host PC logs
+
+[2] P01 Part A - ERROR
+    Path: data\raw\participant_P01\part_A\session_20260115_090558
+    Trials: 42
+    Issues (11):
+      - [Fixation Success] MODERATE fixation success rate: 92.9% (target: >95%)
+      - [Fixation Success] VERY HIGH max fixation time: 31.5s - check for calibration issues
+      - [Fixation Success] FATIGUE EFFECT: Success rate declined 100.0% from first to last block
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_intermediate_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY DATA: 336 NaN values across 8 columns
+      - [Trial Completion] HIGH abort rate: 7.1% (3 trials)
+      - [Trial Completion] INCOMPLETE SESSION: Only 42/351 trials (12.0%)
+      - [Calibration Quality] WARNING: No validation RMS values logged - cannot assess calibration quality
+      - [Calibration Quality]   Recommendation: Manually check validation from EyeLink Host PC logs
+
+[3] P02 Part A - ERROR
+    Path: data\raw\participant_P02\part_A\session_20260115_100559
+    Trials: 11
+    Issues (8):
+      - [Fixation Success] HIGH mean fixation time: 6.48s (threshold: 3s)
+      - [Fixation Success] VERY HIGH max fixation time: 54.2s - check for calibration issues
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_intermediate_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY DATA: 88 NaN values across 8 columns
+      - [Trial Completion] INCOMPLETE SESSION: Only 11/351 trials (3.1%)
+      - [Calibration Quality] WARNING: No validation RMS values logged - cannot assess calibration quality
+      - [Calibration Quality]   Recommendation: Manually check validation from EyeLink Host PC logs
+
+[4] P02 Part A - ERROR
+    Path: data\raw\participant_P02\part_A\session_20260115_102606
+    Trials: 13
+    Issues (6):
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_intermediate_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY DATA: 104 NaN values across 8 columns
+      - [Trial Completion] INCOMPLETE SESSION: Only 13/351 trials (3.7%)
+      - [Calibration Quality] WARNING: No validation RMS values logged - cannot assess calibration quality
+      - [Calibration Quality]   Recommendation: Manually check validation from EyeLink Host PC logs
+
+[5] P02 Part A - ERROR
+    Path: data\raw\participant_P02\part_A\session_20260115_103203
+    Trials: 84
+    Issues (9):
+      - [Fixation Success] HIGH mean fixation time: 5.20s (threshold: 3s)
+      - [Fixation Success] VERY HIGH max fixation time: 173.5s - check for calibration issues
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_intermediate_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY DATA: 672 NaN values across 8 columns
+      - [Trial Completion] INCOMPLETE SESSION: Only 84/351 trials (23.9%)
+      - [Calibration Quality] WARNING: No validation RMS values logged - cannot assess calibration quality
+      - [Calibration Quality]   Recommendation: Manually check validation from EyeLink Host PC logs
+
+[6] P03 Part A - ERROR
+    Path: data\raw\participant_P03\part_A\session_20260115_131914
+    Trials: 351
+    Issues (7):
+      - [Fixation Success] VERY HIGH max fixation time: 85.1s - check for calibration issues
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_intermediate_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY DATA: 2808 NaN values across 8 columns
+      - [Calibration Quality] WARNING: No validation RMS values logged - cannot assess calibration quality
+      - [Calibration Quality]   Recommendation: Manually check validation from EyeLink Host PC logs
+
+[7] P04 Part A - ERROR
+    Path: data\raw\participant_P04\part_A\session_20260115_160736
+    Trials: 351
+    Issues (6):
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_intermediate_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY DATA: 2808 NaN values across 8 columns
+      - [Calibration Quality] WARNING: No validation RMS values logged - cannot assess calibration quality
+      - [Calibration Quality]   Recommendation: Manually check validation from EyeLink Host PC logs
+
+[8] P05 Part A - ERROR
+    Path: data\raw\participant_P05\part_A\session_20260115_172517
+    Trials: 282
+    Issues (10):
+      - [Fixation Success] HIGH mean fixation time: 7.58s (threshold: 3s)
+      - [Fixation Success] VERY HIGH max fixation time: 204.0s - check for calibration issues
+      - [Fixation Success] FATIGUE EFFECT: Success rate declined 100.0% from first to last block
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY for allfar_intermediate_01 - cannot verify clipping
+      - [Polygon Clipping] MISSING GEOMETRY DATA: 2256 NaN values across 8 columns
+      - [Trial Completion] INCOMPLETE SESSION: Only 282/351 trials (80.3%)
+      - [Calibration Quality] WARNING: No validation RMS values logged - cannot assess calibration quality
+      - [Calibration Quality]   Recommendation: Manually check validation from EyeLink Host PC logs
+
+[9] PILOT Part A - ERROR
+    Path: data\raw\participant_PILOT\part_A\session_20260117_160501
+    Trials: 0
+    Issues (4):
+      - [Fixation Success] No trials found
+      - [Trial Completion] INCOMPLETE SESSION: Only 0/351 trials (0.0%)
+      - [Calibration Quality] WARNING: No validation RMS values logged - cannot assess calibration quality
+      - [Calibration Quality]   Recommendation: Manually check validation from EyeLink Host PC logs
+
+
+====================================================================================================
+RECOMMENDATIONS
+====================================================================================================
+
+CRITICAL (9 sessions):
+  - P01 Part A: [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping; [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+  - P01 Part A: [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping; [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+  - P02 Part A: [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping; [Polygon Clipping] MISSING GEOMETRY for allfar_intermediate_01 - cannot verify clipping
+  - P02 Part A: [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping; [Polygon Clipping] MISSING GEOMETRY for allfar_intermediate_01 - cannot verify clipping
+  - P02 Part A: [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping; [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+  - P03 Part A: [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping; [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+  - P04 Part A: [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping; [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+  - P05 Part A: [Polygon Clipping] MISSING GEOMETRY for allfar_concave_01 - cannot verify clipping; [Polygon Clipping] MISSING GEOMETRY for allfar_convex_01 - cannot verify clipping
+  - PILOT Part A: [Trial Completion] INCOMPLETE SESSION: Only 0/351 trials (0.0%)
+
+  ACTION: Review these sessions manually. May need exclusion or re-collection.
+
+
+GENERAL RECOMMENDATIONS FOR FUTURE DATA COLLECTION:
+------------------------------------------------------------
+1. Fixation gating is slow (avg=3.08s):
+   -> Use drift_correction method instead of gaze_gate
+   -> Check calibration quality at start of each block
+
+
+====================================================================================================
+END OF REPORT
+====================================================================================================

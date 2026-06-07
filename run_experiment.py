@@ -27,7 +27,7 @@ USE_EYELINK = True             # Set False for a behavioural-only test (no track
 EYELINK_DUMMY_MODE = False     # True = simulate a tracker (no hardware) for testing.
 EYELINK_ADDRESS = "100.1.1.1"  # EyeLink 1000 Plus default Host PC address.
 CALIBRATION_TYPE = "HV9"       # HV3 / HV5 / HV9 / HV13.
-BINOCULAR = True               # Record both eyes.
+BINOCULAR = False              # Record one eye.
 
 # Gaze-gated fixation parameters (only used when the tracker is connected).
 FIXATION_WINDOW_PX = 100.0     # Acceptance radius around the fixation cross.
@@ -82,13 +82,12 @@ if not image_files:
 # =====================================================================
 # 3. PREPARE AUTOMATED EXPERIMENT TRIALS
 # =====================================================================
-auto_polygon_types = [6]
-stretch_val = 20
-stretch_steps = [step * stretch_val for step in range(-2, 3)]
-rotation_options = [0, 90]
+auto_polygon_types = [5, 6, 7]
+num_of_steps = [range(4)] # 0 = flat edge
+rotation_options = [0, 60, 120, 180, 240, 300]
 fill_options = [True]
-concave_options = [2]
-concave_ratio = [0.2]
+concave_options = [None]  # None = no concavity
+concave_ratio = [0.2]       
 
 # Multiply by TRIAL_REPETITIONS
 base_auto_combos = list(itertools.product(auto_polygon_types, stretch_steps, rotation_options, fill_options, concave_options, concave_ratio))

@@ -1,0 +1,49 @@
+experiment:
+  name: center_bias_exp2
+  version: "0.1.0"
+
+screen:
+  width_cm: 59.77
+  height_cm: 33.62
+  viewing_distance_cm: 70.0
+  resolution_px: [3840, 2160]
+  background_gray: 0.3  # Darker gray (0=black, 1=white, 0.3=dark gray)
+
+eyelink:
+  address: "100.1.1.1"  # Change to your EyeLink IP or null for USB
+  sampling_rate: 1000
+  binocular_enabled: true
+  calibration_type: "HV13"
+  file_sample_data: "LEFT,RIGHT,GAZE,AREA,GAZERES,HREF,PUPIL,STATUS,INPUT"
+  file_event_filter: "LEFT,RIGHT,FIXATION,SACCADE,BLINK,MESSAGE,BUTTON,INPUT"
+  link_sample_data: "LEFT,RIGHT,GAZE,GAZERES,AREA,STATUS"
+  link_event_filter: "LEFT,RIGHT,FIXATION,SACCADE,BLINK,BUTTON"
+  saccade_velocity_threshold: 30
+  saccade_acceleration_threshold: 8000
+
+drift_gate:
+  method: "drift_correction"  # Options: "drift_correction" (recommended) or "gaze_gate"
+  use_builtin: true
+  radius_deg: 1.5
+  dwell_time_ms: 100
+  max_drift_time_s: 10.0
+  # Gaze gate parameters (only used if method="gaze_gate")
+  fixation_window_px: 75  # Radius in pixels (~2° diameter at 70cm)
+  required_fixation_ms: 500  # Milliseconds of stable fixation
+  max_attempts: 3  # Maximum retry attempts before trial exclusion
+
+aoi:
+  radius_deg: 2.0
+
+paths:
+  data_root: "data/raw"
+  manifests:
+    stimulus: "manifests/stimulus_manifest.csv"
+    memory: "manifests/memory_manifest.csv"
+    geometry: "manifests/polygon_geometry.csv"
+  stimuli:
+    polygons: "data/raw/stimuli/polygons"
+    images: "data/raw/stimuli/CAT2000"
+
+logging:
+  flush_trial_rows: true

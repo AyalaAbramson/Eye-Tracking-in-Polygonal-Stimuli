@@ -1,0 +1,6 @@
+timestamp,participant_id,part,mini_block,probe_image_id,probe_image_path,probe_duration_s,is_old,response,response_time_ms,correct,probe_start_time,probe_end_time
+2026-01-21T11:32:39.109885,P02,B,1,B_MEM_Random_039,data/raw/stimuli/CAT2000/Random/039.jpg,3.0,False,new,3088.359300047159,True,878.6373387002386,886.8820092999376
+2026-01-21T11:39:17.289927,P02,B,2,B_MEM_Object_151,data/raw/stimuli/CAT2000/Object/151.jpg,3.0,False,new,1579.590699635446,True,1278.3422294002958,1285.0768013000488
+2026-01-21T11:45:58.905686,P02,B,3,B_Fractal_083,data/raw/stimuli/CAT2000/Fractal/083.jpg,3.0,True,new,3826.1509998701513,False,1677.6962915002368,1686.6934760999866
+2026-01-21T11:54:14.017140,P02,B,4,B_Object_125,data/raw/stimuli/CAT2000/Object/125.jpg,3.0,True,old,7403.900700155646,True,2169.248359499965,2181.805075299926
+2026-01-21T12:04:48.675169,P02,B,5,B_OutdoorNatural_111,data/raw/stimuli/CAT2000/OutdoorNatural/111.jpg,3.0,True,new,1892.3483998514712,False,2809.403914600145,2816.4724167003296

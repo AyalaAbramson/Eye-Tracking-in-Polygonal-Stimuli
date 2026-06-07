@@ -1,0 +1,14 @@
+n_bbc,n_chc,n_com,n_icc,n_trials,polygon_case,winner,winner_percentage
+37,0,8,73,118,allfar_concave,ICC,61.86440677966102
+0,0,85,33,118,allfar_convex,CoM,72.03389830508475
+0,79,38,0,117,allfar_intermediate,CHC,67.52136752136752
+0,0,119,0,119,baseline_asymmetric,CoM,100.0
+0,0,116,0,116,baseline_rectangle,CoM,100.0
+0,0,120,0,120,baseline_symmetric,CoM,100.0
+111,81,0,164,356,iso_bbc,ICC,46.06741573033708
+0,151,86,116,353,iso_chc,CHC,42.77620396600567
+84,1,160,110,355,iso_com,CoM,45.07042253521127
+36,75,166,80,357,iso_icc,CoM,46.49859943977591
+79,38,162,72,351,pair_C1_bbc_vs_chc_icc,CoM,46.15384615384615
+36,85,162,72,355,pair_C2_chc_vs_bbc_icc,CoM,45.63380281690141
+34,37,78,204,353,pair_C3_icc_vs_chc_bbc,ICC,57.79036827195468

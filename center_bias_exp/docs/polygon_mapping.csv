@@ -1,0 +1,28 @@
+polygon_id,polygon_case,json_filename,polygon_json_path,description
+allfar_concave_01,allfar_concave,allfar_concave.json,data/raw/stimuli/polygons/allfar_concave.json,Concave polygon with all centers far apart
+allfar_convex_01,allfar_convex,allfar_convex.json,data/raw/stimuli/polygons/allfar_convex.json,Convex polygon with all centers far apart
+allfar_intermediate_01,allfar_intermediate,allfar_intermediate.json,data/raw/stimuli/polygons/allfar_intermediate.json,Intermediate polygon with all centers far apart
+baseline_rect_01,baseline_rectangle,baseline_rectangle.json,data/raw/stimuli/polygons/baseline_rectangle.json,Baseline rectangle shape
+baseline_sym_01,baseline_symmetric,baseline_symmetric_consolidated.json,data/raw/stimuli/polygons/baseline_symmetric_consolidated.json,Baseline symmetric shape
+baseline_asym_01,baseline_asymmetric,baseline_asymmetric_consolidated.json,data/raw/stimuli/polygons/baseline_asymmetric_consolidated.json,Baseline asymmetric shape
+iso_com_01,iso_com,iso_com_01.json,data/raw/stimuli/polygons/iso_com_01.json,Iso-dispersion COM variant 1
+iso_com_02,iso_com,iso_com_02.json,data/raw/stimuli/polygons/iso_com_02.json,Iso-dispersion COM variant 2
+iso_com_03,iso_com,iso_com_03.json,data/raw/stimuli/polygons/iso_com_03.json,Iso-dispersion COM variant 3
+iso_chc_01,iso_chc,iso_chc_01.json,data/raw/stimuli/polygons/iso_chc_01.json,Iso-dispersion CHC variant 1
+iso_chc_02,iso_chc,iso_chc_02.json,data/raw/stimuli/polygons/iso_chc_02.json,Iso-dispersion CHC variant 2
+iso_chc_03,iso_chc,iso_chc_03.json,data/raw/stimuli/polygons/iso_chc_03.json,Iso-dispersion CHC variant 3
+iso_bbc_01,iso_bbc,iso_bbc_01.json,data/raw/stimuli/polygons/iso_bbc_01.json,Iso-dispersion BBC variant 1
+iso_bbc_02,iso_bbc,iso_bbc_02.json,data/raw/stimuli/polygons/iso_bbc_02.json,Iso-dispersion BBC variant 2
+iso_bbc_03,iso_bbc,iso_bbc_03.json,data/raw/stimuli/polygons/iso_bbc_03.json,Iso-dispersion BBC variant 3
+iso_icc_01,iso_icc,iso_icc_01.json,data/raw/stimuli/polygons/iso_icc_01.json,Iso-dispersion ICC variant 1
+iso_icc_02,iso_icc,iso_icc_02.json,data/raw/stimuli/polygons/iso_icc_02.json,Iso-dispersion ICC variant 2
+iso_icc_03,iso_icc,iso_icc_03.json,data/raw/stimuli/polygons/iso_icc_03.json,Iso-dispersion ICC variant 3
+pair_C1_01,pair_C1_bbc_vs_chc_icc,pair_com_bbc_vs_chc_icc_01.json,data/raw/stimuli/polygons/pair_com_bbc_vs_chc_icc_01.json,Pair condition 1: COM+BBC vs CHC+ICC - variant 1
+pair_C1_02,pair_C1_bbc_vs_chc_icc,pair_com_bbc_vs_chc_icc_02.json,data/raw/stimuli/polygons/pair_com_bbc_vs_chc_icc_02.json,Pair condition 1: COM+BBC vs CHC+ICC - variant 2
+pair_C1_03,pair_C1_bbc_vs_chc_icc,pair_com_bbc_vs_chc_icc_03.json,data/raw/stimuli/polygons/pair_com_bbc_vs_chc_icc_03.json,Pair condition 1: COM+BBC vs CHC+ICC - variant 3
+pair_C2_01,pair_C2_chc_vs_bbc_icc,pair_com_chc_vs_bbc_icc_01.json,data/raw/stimuli/polygons/pair_com_chc_vs_bbc_icc_01.json,Pair condition 2: COM+CHC vs BBC+ICC - variant 1
+pair_C2_02,pair_C2_chc_vs_bbc_icc,pair_com_chc_vs_bbc_icc_02.json,data/raw/stimuli/polygons/pair_com_chc_vs_bbc_icc_02.json,Pair condition 2: COM+CHC vs BBC+ICC - variant 2
+pair_C2_03,pair_C2_chc_vs_bbc_icc,pair_com_chc_vs_bbc_icc_03.json,data/raw/stimuli/polygons/pair_com_chc_vs_bbc_icc_03.json,Pair condition 2: COM+CHC vs BBC+ICC - variant 3
+pair_C3_01,pair_C3_icc_vs_chc_bbc,pair_com_icc_vs_chc_bbc_01.json,data/raw/stimuli/polygons/pair_com_icc_vs_chc_bbc_01.json,Pair condition 3: COM+ICC vs CHC+BBC - variant 1
+pair_C3_02,pair_C3_icc_vs_chc_bbc,pair_com_icc_vs_chc_bbc_02.json,data/raw/stimuli/polygons/pair_com_icc_vs_chc_bbc_02.json,Pair condition 3: COM+ICC vs CHC+BBC - variant 2
+pair_C3_03,pair_C3_icc_vs_chc_bbc,pair_com_icc_vs_chc_bbc_03.json,data/raw/stimuli/polygons/pair_com_icc_vs_chc_bbc_03.json,Pair condition 3: COM+ICC vs CHC+BBC - variant 3
