@@ -90,7 +90,7 @@ def generate_auto_polygon(num_vertices=None, step=0,  rotation_deg=0, target_idx
             concave_depth = base_radius * concave_ratio
             current_radius = flat_edge_radius - concave_depth
         elif target_idx is not None and i == target_idx:
-            if step < 0:
+            if step == -1:
                 current_radius = 0  # Fully collapsed (point)
             else:
                 flat_edge_radius = base_radius * math.cos(2 * math.pi / num_vertices)

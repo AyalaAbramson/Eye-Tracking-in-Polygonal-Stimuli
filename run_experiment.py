@@ -23,8 +23,8 @@ TRIAL_REPETITIONS = 1    # Number of times each generated shape repeats
 DEBUG_MODE = False
 
 # --- EyeLink 1000 Plus configuration ---
-USE_EYELINK = True             # Set False for a behavioural-only test (no tracker).
-EYELINK_DUMMY_MODE = False     # True = simulate a tracker (no hardware) for testing.
+USE_EYELINK = False            # Set False for a behavioural-only test (no tracker).
+EYELINK_DUMMY_MODE = True      # True = simulate a tracker (no hardware) for testing.
 EYELINK_ADDRESS = "100.1.1.1"  # EyeLink 1000 Plus default Host PC address.
 CALIBRATION_TYPE = "HV9"       # HV3 / HV5 / HV9 / HV13.
 BINOCULAR = False              # Record one eye.
@@ -83,23 +83,23 @@ if not image_files:
 # 3. PREPARE AUTOMATED EXPERIMENT TRIALS
 # =====================================================================
 auto_polygon_types = [5, 6, 7]
-num_of_steps = [range(4)] # 0 = flat edge
+num_of_steps = [0, 1, 2, 3] # 0 = flat edge
 rotation_options = [0, 60, 120, 180, 240, 300]
 fill_options = [True]
 concave_options = [None]  # None = no concavity
 concave_ratio = [0.2]       
 
 # Multiply by TRIAL_REPETITIONS
-base_auto_combos = list(itertools.product(auto_polygon_types, stretch_steps, rotation_options, fill_options, concave_options, concave_ratio))
+base_auto_combos = list(itertools.product(auto_polygon_types, num_of_steps, rotation_options, fill_options, concave_options, concave_ratio))
 auto_combos = base_auto_combos * TRIAL_REPETITIONS
 random.shuffle(auto_combos)
 
 trial_data_auto = []
-for sides, s_amt, rot, is_filled, c_idx, c_ratio in auto_combos:
+for sides, step, rot, is_filled, c_idx, c_ratio in auto_combos:
     tex = random.choice(image_files) if (image_files and is_filled) else None
 
     img, actual_points, base_points = generate_auto_polygon(
-        num_vertices=sides, stretch_amt=s_amt, rotation_deg=rot,
+        num_vertices=sides, step=step, rotation_deg=rot,
         target_idx=0, concave_idx=c_idx, concave_ratio=c_ratio, texture_path=tex, size=IMAGE_SIZE
     )
     trial_data_auto.append({
