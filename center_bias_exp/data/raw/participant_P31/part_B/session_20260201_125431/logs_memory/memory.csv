@@ -1,4 +1,0 @@
-timestamp,participant_id,part,mini_block,probe_image_id,probe_image_path,probe_duration_s,is_old,response,response_time_ms,correct,probe_start_time,probe_end_time
-2026-02-01T13:01:55.804485,P31,B,7,B_Sketch_169,data/raw/stimuli/CAT2000/Sketch/169.jpg,3.0,True,new,14000.297399703413,False,429.14383069984615,448.36616689991206
-2026-02-01T13:09:41.148846,P31,B,8,B_MEM_OutdoorNatural_171,data/raw/stimuli/CAT2000/OutdoorNatural/171.jpg,3.0,False,new,22939.63210005313,True,885.5886959000491,913.6998119000345
-2026-02-01T13:16:19.874601,P31,B,9,B_Object_011,data/raw/stimuli/CAT2000/Object/011.jpg,3.0,True,new,7284.472699742764,False,1299.9994314000942,1312.4375438001007

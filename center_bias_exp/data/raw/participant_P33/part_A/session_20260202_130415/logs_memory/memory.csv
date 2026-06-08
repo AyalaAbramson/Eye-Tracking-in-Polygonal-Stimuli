@@ -1,5 +1,0 @@
-timestamp,participant_id,part,mini_block,probe_image_id,probe_image_path,probe_duration_s,is_old,response,response_time_ms,correct,probe_start_time,probe_end_time
-2026-02-02T13:17:08.896000,P33,A,1,A_MEM_Sketch_085,data/raw/stimuli/CAT2000/Sketch/085.jpg,3.0,False,old,21878.501099999994,False,799.0015518995933,826.1030689999461
-2026-02-02T13:24:15.356575,P33,A,2,A_Fractal_127,data/raw/stimuli/CAT2000/Fractal/127.jpg,3.0,True,new,7104.00540009141,False,1240.2745709000155,1252.572507799603
-2026-02-02T13:33:57.535994,P33,A,3,A_Satelite_069,data/raw/stimuli/CAT2000/Satelite/069.jpg,3.0,True,new,12886.241700034589,False,1816.691546399612,1834.7513980995864
-2026-02-02T13:42:52.482213,P33,A,4,A_Satelite_023,data/raw/stimuli/CAT2000/Satelite/023.jpg,3.0,True,new,11308.058600407094,False,2353.205591699574,2369.685805699788

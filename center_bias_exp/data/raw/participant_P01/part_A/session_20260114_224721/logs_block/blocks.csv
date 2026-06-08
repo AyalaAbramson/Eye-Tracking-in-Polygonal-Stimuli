@@ -1,2 +1,0 @@
-timestamp,participant_id,part,mini_block,calibration_start_time,calibration_end_time,calibration_result,calibration_error_deg,validation_result,validation_error_avg_deg,validation_error_max_deg,n_trials,n_trials_completed,n_drift_failures,n_recalibrations_within_block,memory_response,memory_correct,memory_rt_ms,break_duration_actual_s,block_start_time,block_end_time,block_duration_s
-2026-01-14T22:53:43.422847,P01,A,1,4.065044800052419,56.90343749988824,PASS,,PASS,,,39,39,0,0,new,True,5841.734499903396,60.02343020006083,4.064891899935901,382.3278417000547,378.2629498001188

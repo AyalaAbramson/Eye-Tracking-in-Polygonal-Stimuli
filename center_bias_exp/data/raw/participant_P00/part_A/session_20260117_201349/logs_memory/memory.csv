@@ -1,2 +1,0 @@
-timestamp,participant_id,part,mini_block,probe_image_id,probe_image_path,probe_duration_s,is_old,response,response_time_ms,correct,probe_start_time,probe_end_time
-2026-01-17T20:20:19.961057,P00,A,1,A_MEM_Sketch_085,data/raw/stimuli/CAT2000/Sketch/085.jpg,3.0,False,new,9105.64720025286,True,380.93538299994543,395.28220499958843
