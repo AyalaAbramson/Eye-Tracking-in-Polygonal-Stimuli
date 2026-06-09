@@ -12,7 +12,7 @@ from core_functions import generate_auto_polygon, generate_manual_polygon, run_f
 # =====================================================================
 # 1. EXPERIMENT CONFIGURATION
 # =====================================================================
-IMAGE_DATABASE_PATH = r"C:\Users\User\Desktop\דברים\תמונות"
+IMAGE_DATABASE_PATH = r"C:\Users\owner\BrahanProjects\center_bias_exp\data\raw\stimuli\CAT2000\Object"
 IMAGE_SIZE = (800, 800)
 DISPLAY_TIME_SEC = 5
 FIXATION_TIME_SEC = 1.0
@@ -20,7 +20,7 @@ TRIAL_REPETITIONS = 1    # Number of times each generated shape repeats
 
 # Toggle this to True to see grids, centers, and vertices.
 # Toggle to False for the clean, real experiment.
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 # --- EyeLink 1000 Plus configuration ---
 USE_EYELINK = False            # Set False for a behavioural-only test (no tracker).
