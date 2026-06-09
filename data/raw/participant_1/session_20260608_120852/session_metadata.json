@@ -1,0 +1,28 @@
+{
+  "participant": {
+    "participant_id": "1",
+    "age": "1",
+    "gender": "1",
+    "timestamp": "2026-06-08T12:08:52.362875"
+  },
+  "session_stamp": "20260608_120852",
+  "mode": "REAL",
+  "n_trials": 72,
+  "trial_set": "auto",
+  "display_time_sec": 5,
+  "image_size": [
+    800,
+    800
+  ],
+  "use_eyelink": false,
+  "eyelink": {
+    "dummy_mode": true,
+    "address": "100.1.1.1",
+    "calibration_type": "HV9",
+    "binocular": false,
+    "edf_name": null,
+    "fixation_window_px": 100.0,
+    "fixation_required_ms": 300.0,
+    "fixation_max_wait_s": 10.0
+  }
+}
