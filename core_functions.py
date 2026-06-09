@@ -54,7 +54,7 @@ def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, siz
 
     if not has_texture:
         draw = ImageDraw.Draw(final_img)
-        draw.polygon(points, outline="black", width=5)
+        draw.polygon(points, fill="black")
 
     return final_img, points, None
 
@@ -119,15 +119,37 @@ def generate_auto_polygon(num_vertices=None, step=0,  rotation_deg=0, target_idx
 
     if not has_texture:
         draw = ImageDraw.Draw(final_img)
-        draw.polygon(points, outline="black", width=5)
+        draw.polygon(points, fill="black")
 
     return final_img, points, base_points
+
+
+DEFAULT_BLOCK_INTRO_LINES = [
+    "The experiment is divided into blocks.",
+    "After each block there will be a short memory task,",
+    "in which one shape will be shown and you decide whether",
+    "it appeared in the block you just saw.",
+    "Press 1 if it appeared, or 2 if it did not.",
+    "",
+    "Press SPACE to begin.",
+]
+
+MEMORY_TASK_INTRO_LINES = [
+    "Memory task:",
+    "",
+    "\"1\" - appeared",
+    "\"2\" - didn't appear",
+    "",
+    "Press SPACE to see the shape.",
+]
 
 
 def run_full_experiment(trial_list, display_duration_sec=3, debug=False,
                         tracker=None, exp_clock=None, screen=None,
                         trial_writer=None, trial_file=None, fixation_window_px=100.0,
-                        fixation_required_ms=300.0, fixation_max_wait_s=10.0):
+                        fixation_required_ms=300.0, fixation_max_wait_s=10.0,
+                        block_size=None, memory_probes=None,
+                        block_intro_lines=None):
     """
     Handles the full-screen display loop using Pygame.
     If debug=True, draws technical overlays (grids, vertices) over the display.
@@ -163,6 +185,7 @@ def run_full_experiment(trial_list, display_duration_sec=3, debug=False,
             exp_clock = eli.ExpClock()
 
     pygame.init()
+    pygame.font.init()
 
     # 1. Setup fullscreen window.
     # When a tracker is attached, pylink.openGraphics has already created the
@@ -210,7 +233,100 @@ def run_full_experiment(trial_list, display_duration_sec=3, debug=False,
 
     finished_normally = True
 
+    # ------------------------------------------------------------------
+    # Block / memory-task setup and helpers
+    # ------------------------------------------------------------------
+    if not block_size or block_size < 1:
+        block_size = len(trial_list)  # single block = no memory tasks
+    if block_intro_lines is None:
+        block_intro_lines = DEFAULT_BLOCK_INTRO_LINES
+
+    text_font = pygame.font.SysFont(None, 48)
+
+    def show_text_screen(lines, accept_keys=None):
+        """Draw centered text lines and wait for a key.
+
+        accept_keys: iterable of pygame key codes to accept (None = any key).
+        Returns the accepted key code, or the string "ABORT" on Q/ESC/quit.
+        """
+        screen.fill(GREY)
+        line_h = 60
+        y0 = center_y - (len(lines) * line_h) // 2
+        for i, line in enumerate(lines):
+            surf = text_font.render(line, True, BLACK)
+            rect = surf.get_rect(center=(center_x, y0 + i * line_h))
+            screen.blit(surf, rect)
+        pygame.display.flip()
+
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return "ABORT"
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                        return "ABORT"
+                    if accept_keys is None or event.key in accept_keys:
+                        return event.key
+            clock.tick(60)
+
+    def show_memory_task(probe_image):
+        """Show one probe shape with the 1/2 question. Waits for 1 or 2.
+
+        Returns "1", "2", or "ABORT". The answer is not recorded.
+        """
+        # Instruction slide shown first (like the intro slide), then the shape.
+        intro_res = show_text_screen(MEMORY_TASK_INTRO_LINES)
+        if intro_res == "ABORT":
+            return "ABORT"
+
+        screen.fill(GREY)
+
+        # Blit the probe shape centered.
+        mode = probe_image.mode
+        size = probe_image.size
+        py_image = pygame.image.fromstring(probe_image.tobytes(), size, mode)
+        w, h = size
+        screen.blit(py_image, (center_x - w // 2, center_y - h // 2))
+        pygame.display.flip()
+
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return "ABORT"
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                        return "ABORT"
+                    if event.key in (pygame.K_1, pygame.K_KP1):
+                        return "1"
+                    if event.key in (pygame.K_2, pygame.K_KP2):
+                        return "2"
+            clock.tick(60)
+
+    def write_block_marker(block_num):
+        """Document the start of a new block in the trial CSV."""
+        if trial_writer is None:
+            return
+        # 3 populated fields + pad to the 20-column trial row.
+        row = ["", datetime.now().isoformat(), f"block_start_{block_num}"] + [""] * 17
+        trial_writer.writerow(row)
+        if trial_file is not None:
+            trial_file.flush()
+            try:
+                os.fsync(trial_file.fileno())
+            except (OSError, ValueError):
+                pass
+
+    # Intro screen shown once, after calibration, before the first trial.
+    intro_res = show_text_screen(block_intro_lines)
+    if intro_res == "ABORT":
+        print("Experiment terminated by user.")
+        pygame.quit()
+        return False
+
     for trial_index, trial in enumerate(trial_list, start=1):
+        # Document the beginning of each block (1-based block number).
+        if (trial_index - 1) % block_size == 0:
+            write_block_marker((trial_index - 1) // block_size + 1)
         # ==========================================
         # STAGE 1: FIXATION SCREEN
         # ==========================================
@@ -420,6 +536,21 @@ def run_full_experiment(trial_list, display_duration_sec=3, debug=False,
             print("Experiment terminated by user.")
             finished_normally = False
             break
+
+        # ==========================================
+        # STAGE 4: MEMORY TASK (end of every block)
+        # ==========================================
+        block_ended = (trial_index % block_size == 0) or (trial_index == len(trial_list))
+        if block_ended and memory_probes:
+            block_num = (trial_index - 1) // block_size + 1
+            probe = memory_probes[block_num - 1] if block_num - 1 < len(memory_probes) else None
+            if probe is not None:
+                mem_res = show_memory_task(probe["image"])
+                if mem_res == "ABORT":
+                    print("Experiment terminated by user.")
+                    finished_normally = False
+                    break
+                # Answer is intentionally not recorded; key press just advances.
 
     # Safely close Pygame window at the end
     if use_tracker:

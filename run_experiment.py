@@ -1,7 +1,7 @@
 import os
 import csv
-import glob
 import json
+import math
 import random
 import itertools
 from datetime import datetime
@@ -12,15 +12,19 @@ from core_functions import generate_auto_polygon, generate_manual_polygon, run_f
 # =====================================================================
 # 1. EXPERIMENT CONFIGURATION
 # =====================================================================
-IMAGE_DATABASE_PATH = r"C:\Users\owner\BrahanProjects\center_bias_exp\data\raw\stimuli\CAT2000\Object"
+IMAGE_DATABASE_PATH = r"path\to\your\image\folder"  # Update this to your actual image folder path.
+# Separate image folder used ONLY for the "did not appear" memory-task probes,
+# so those fill pictures are guaranteed never to show up in the actual trials.
+MEMORY_UNUSED_IMAGE_PATH = r"path\to\your\unused\images"  # Update this to your actual unused image folder path.
 IMAGE_SIZE = (800, 800)
-DISPLAY_TIME_SEC = 5
+MEMORY_BLOCK_SIZE = 3  # A memory task runs after every this-many trials.
+DISPLAY_TIME_SEC = 3
 FIXATION_TIME_SEC = 1.0
 TRIAL_REPETITIONS = 1    # Number of times each generated shape repeats
 
 # Toggle this to True to see grids, centers, and vertices.
 # Toggle to False for the clean, real experiment.
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 # --- EyeLink 1000 Plus configuration ---
 USE_EYELINK = False            # Set False for a behavioural-only test (no tracker).
@@ -72,12 +76,31 @@ def prompt_participant_info():
 # =====================================================================
 # 2. GATHER IMAGES
 # =====================================================================
-image_files = glob.glob(os.path.join(IMAGE_DATABASE_PATH, "**/*.jpg"), recursive=True) + \
-              glob.glob(os.path.join(IMAGE_DATABASE_PATH, "**/*.png"), recursive=True)
-image_files.sort()
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")
+
+
+def gather_images(folder):
+    """Return all image files under folder, matching extensions case-insensitively."""
+    files = [
+        os.path.join(root, name)
+        for root, _dirs, names in os.walk(folder)
+        for name in names
+        if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS
+    ]
+    files.sort()
+    return files
+
+
+image_files = gather_images(IMAGE_DATABASE_PATH)
 
 if not image_files:
     print(f"Warning: No images found in {IMAGE_DATABASE_PATH}")
+
+# Images used ONLY for memory-task "did not appear" probes (never in trials).
+memory_unused_images = gather_images(MEMORY_UNUSED_IMAGE_PATH)
+
+if not memory_unused_images:
+    print(f"Warning: No memory-task images found in {MEMORY_UNUSED_IMAGE_PATH}")
 
 # =====================================================================
 # 3. PREPARE AUTOMATED EXPERIMENT TRIALS
@@ -87,10 +110,23 @@ num_of_steps = [0, 1, 2, 3] # 0 = flat edge
 rotation_options = [0, 60, 120, 180, 240, 300]
 fill_options = [True]
 concave_options = [None]  # None = no concavity
-concave_ratio = [0.2]       
+concave_ratio = [0.2]     
+
+# for step == 1 (no stretch) create only one rotation combo
+def get_rotations(step):
+    return [rotation_options[0]] if step == 1 else rotation_options
 
 # Multiply by TRIAL_REPETITIONS
-base_auto_combos = list(itertools.product(auto_polygon_types, num_of_steps, rotation_options, fill_options, concave_options, concave_ratio))
+base_auto_combos = [
+    (sides, step, rot, is_filled, c_idx, c_ratio)
+    for sides in auto_polygon_types
+    for step in num_of_steps
+    # num_of_steps == 1 has no stretch, so all rotations look the same -> use only one rotation
+    for rot in get_rotations(step)
+    for is_filled in fill_options
+    for c_idx in concave_options
+    for c_ratio in concave_ratio
+]
 auto_combos = base_auto_combos * TRIAL_REPETITIONS
 random.shuffle(auto_combos)
 
@@ -136,6 +172,42 @@ for (radii, angles), rot, is_filled in manual_combos:
 # =====================================================================
 # Choose which trial list to run: trial_data_auto or trial_data_manual.
 ACTIVE_TRIALS = trial_data_auto
+
+
+def build_memory_probes(trials, block_size, unused_images):
+    """Create one memory-task probe per block.
+
+    The correct answer is "1" (appeared) once every two blocks; on those blocks
+    the probe is one of the polygons actually shown in that block (same fill).
+    On the other blocks the correct answer is "2" (did not appear): a freshly
+    generated polygon filled with a picture from the unused-images folder, so it
+    is guaranteed never to have appeared in the experiment.
+    """
+    probes = []
+    n_blocks = math.ceil(len(trials) / block_size) if trials else 0
+    for b in range(n_blocks):
+        block_trials = trials[b * block_size:(b + 1) * block_size]
+        # Alternate, starting with "appeared" on the first block.
+        correct = "1" if (b % 2 == 0) else "2"
+
+        if correct == "1" and block_trials:
+            probe_img = random.choice(block_trials)["image"]
+        else:
+            correct = "2"  # fall back to "did not appear" if the block is empty
+            tex = random.choice(unused_images) if unused_images else None
+            sides = random.choice(auto_polygon_types)
+            step = random.choice(num_of_steps)
+            rot = random.choice(get_rotations(step))
+            probe_img, _, _ = generate_auto_polygon(
+                num_vertices=sides, step=step, rotation_deg=rot,
+                target_idx=0, concave_idx=None, concave_ratio=concave_ratio[0],
+                texture_path=tex, size=IMAGE_SIZE,
+            )
+        probes.append({"image": probe_img, "correct": correct})
+    return probes
+
+
+memory_probes = build_memory_probes(ACTIVE_TRIALS, MEMORY_BLOCK_SIZE, memory_unused_images)
 
 mode_str = "DEBUG" if DEBUG_MODE else "REAL"
 
@@ -199,6 +271,8 @@ with open(metadata_path, "w", encoding="utf-8") as f:
         "session_stamp": session_stamp,
         "mode": mode_str,
         "n_trials": len(ACTIVE_TRIALS),
+        "block_size": MEMORY_BLOCK_SIZE,
+        "n_blocks": len(memory_probes),
         "trial_set": "auto" if ACTIVE_TRIALS is trial_data_auto else "manual",
         "display_time_sec": DISPLAY_TIME_SEC,
         "image_size": list(IMAGE_SIZE),
@@ -234,6 +308,8 @@ try:
             fixation_window_px=FIXATION_WINDOW_PX,
             fixation_required_ms=FIXATION_REQUIRED_MS,
             fixation_max_wait_s=FIXATION_MAX_WAIT_S,
+            block_size=MEMORY_BLOCK_SIZE,
+            memory_probes=memory_probes,
         )
     print(f"Trial data saved to {trial_csv_path}")
 except KeyboardInterrupt:
