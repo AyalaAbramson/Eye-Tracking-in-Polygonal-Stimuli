@@ -137,22 +137,22 @@ random.shuffle(auto_combos)
 
 
 def make_image_sampler(images):
-    """Yield images without replacement.
+    """Yield images without replacement, in a fixed (non-random) order.
 
-    Each image is used once before any repeats. If more images are requested
-    than exist in the folder, the pool is reshuffled and reused, so repetition
-    is spread as evenly as possible instead of being random-with-replacement.
-    Returns None forever when no images are available.
+    Images are returned in the sorted order in which they were gathered, so the
+    textured polygons appear in exactly the same order on every run. Each image
+    is used once before any repeats; when the list is exhausted it simply starts
+    again from the beginning. Returns None forever when no images are available.
     """
-    pool = []
+    index = 0
 
     def next_image():
+        nonlocal index
         if not images:
             return None
-        if not pool:
-            pool.extend(images)
-            random.shuffle(pool)
-        return pool.pop()
+        image = images[index % len(images)]
+        index += 1
+        return image
 
     return next_image
 
