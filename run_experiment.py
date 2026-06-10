@@ -1,5 +1,6 @@
 import os
 import csv
+import glob
 import json
 import math
 import random
@@ -76,6 +77,13 @@ def prompt_participant_info():
 # =====================================================================
 # 2. GATHER IMAGES
 # =====================================================================
+image_files = glob.glob(os.path.join(IMAGE_DATABASE_PATH, "**/*.jpg"), recursive=True) + \
+              glob.glob(os.path.join(IMAGE_DATABASE_PATH, "**/*.png"), recursive=True)
+image_files.sort()
+
+if not image_files:
+    print(f"Warning: No images found in {IMAGE_DATABASE_PATH}")
+
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")
 
 
@@ -91,11 +99,6 @@ def gather_images(folder):
     return files
 
 
-image_files = gather_images(IMAGE_DATABASE_PATH)
-
-if not image_files:
-    print(f"Warning: No images found in {IMAGE_DATABASE_PATH}")
-
 # Images used ONLY for memory-task "did not appear" probes (never in trials).
 memory_unused_images = gather_images(MEMORY_UNUSED_IMAGE_PATH)
 
@@ -105,12 +108,13 @@ if not memory_unused_images:
 # =====================================================================
 # 3. PREPARE AUTOMATED EXPERIMENT TRIALS
 # =====================================================================
+# 3*4*5*2 + 6 = 126 --> 378 sec --> 6 min
 auto_polygon_types = [5, 6, 7]
-num_of_steps = [0, 1, 2, 3] # 0 = flat edge
-rotation_options = [0, 60, 120, 180, 240, 300]
-fill_options = [True]
+num_of_steps = [-1, 0, 1, 3, 4] # 0 = flat edge
+rotation_options = [0, 45, 90, 135, 180]
+fill_options = [True, False]
 concave_options = [None]  # None = no concavity
-concave_ratio = [0.2]     
+concave_ratio = [0.0]     
 
 # for step == 1 (no stretch) create only one rotation combo
 def get_rotations(step):
@@ -143,7 +147,7 @@ for sides, step, rot, is_filled, c_idx, c_ratio in auto_combos:
     })
 
 # =====================================================================
-# 4. PREPARE MANUAL EXPERIMENT TRIALS
+# 4. PREPARE MANUAL EXPERIMENT TRIALS - not used in this experiment
 # =====================================================================
 manual_shapes = [
     ([200, 100, 200, 100], [90, 90, 90, 90]),
