@@ -135,9 +135,32 @@ base_auto_combos = [
 auto_combos = base_auto_combos * TRIAL_REPETITIONS
 random.shuffle(auto_combos)
 
+
+def make_image_sampler(images):
+    """Yield images without replacement.
+
+    Each image is used once before any repeats. If more images are requested
+    than exist in the folder, the pool is reshuffled and reused, so repetition
+    is spread as evenly as possible instead of being random-with-replacement.
+    Returns None forever when no images are available.
+    """
+    pool = []
+
+    def next_image():
+        if not images:
+            return None
+        if not pool:
+            pool.extend(images)
+            random.shuffle(pool)
+        return pool.pop()
+
+    return next_image
+
+next_trial_image = make_image_sampler(image_files)
+
 trial_data_auto = []
 for sides, step, rot, is_filled, c_idx, c_ratio in auto_combos:
-    tex = random.choice(image_files) if (image_files and is_filled) else None
+    tex = next_trial_image() if is_filled else None
 
     img, actual_points, base_points = generate_auto_polygon(
         num_vertices=sides, step=step, rotation_deg=rot,
@@ -160,9 +183,11 @@ base_manual_combos = list(itertools.product(manual_shapes, rotation_options, fil
 manual_combos = base_manual_combos * TRIAL_REPETITIONS
 random.shuffle(manual_combos)
 
+next_manual_image = make_image_sampler(image_files)
+
 trial_data_manual = []
 for (radii, angles), rot, is_filled in manual_combos:
-    tex = random.choice(image_files) if (image_files and is_filled) else None
+    tex = next_manual_image() if is_filled else None
 
     img, actual_points, base_points = generate_manual_polygon(
         manual_radii=radii, manual_angles_deg=angles, rotation_deg=rot,
