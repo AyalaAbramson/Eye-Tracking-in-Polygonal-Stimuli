@@ -13,11 +13,11 @@ from core_functions import generate_auto_polygon, generate_manual_polygon, run_f
 # =====================================================================
 # 1. EXPERIMENT CONFIGURATION
 # =====================================================================
-IMAGE_DATABASE_PATH = r"path\to\your\image\folder"  # Update this to your actual image folder path.
+IMAGE_DATABASE_PATH = r"C:\Users\owner\Desktop\new-project\Trials_images"  # Update this to your actual image folder path.
 # Separate image folder used ONLY for the "did not appear" memory-task probes,
 # so those fill pictures are guaranteed never to show up in the actual trials.
-MEMORY_UNUSED_IMAGE_PATH = r"path\to\your\unused\images"  # Update this to your actual unused image folder path.
-IMAGE_SIZE = (1100, 900)
+MEMORY_UNUSED_IMAGE_PATH = r"C:\Users\owner\Desktop\new-project\memory_task_images"  # Update this to your actual unused image folder path.
+IMAGE_SIZE = (1100, 1100)
 MEMORY_BLOCK_SIZE = 21  # A memory task runs after every this-many trials.
 DISPLAY_TIME_SEC = 3
 FIXATION_TIME_SEC = 1.0
@@ -28,8 +28,8 @@ TRIAL_REPETITIONS = 1    # Number of times each generated shape repeats
 DEBUG_MODE = False
 
 # --- EyeLink 1000 Plus configuration ---
-USE_EYELINK = True            # Set False for a behavioural-only test (no tracker).
-EYELINK_DUMMY_MODE = False      # True = simulate a tracker (no hardware) for testing.
+USE_EYELINK = False            # Set False for a behavioural-only test (no tracker).
+EYELINK_DUMMY_MODE = True      # True = simulate a tracker (no hardware) for testing.
 EYELINK_ADDRESS = "100.1.1.1"  # EyeLink 1000 Plus default Host PC address.
 CALIBRATION_TYPE = "HV9"       # HV3 / HV5 / HV9 / HV13.
 BINOCULAR = False              # Record one eye.

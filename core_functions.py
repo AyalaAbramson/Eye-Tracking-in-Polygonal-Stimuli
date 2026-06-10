@@ -9,7 +9,16 @@ from PIL import Image, ImageDraw, ImageOps
 # Uniform mid-grey background used everywhere (stimulus images, trial screen,
 # and EyeLink calibration/validation) so luminance is constant throughout.
 BG_GREY = (128, 128, 128)
-
+# Define basic colors
+WHITE = (255, 255, 255)
+GREY = BG_GREY
+BLACK = (0, 0, 0)
+BLUE = (0, 0, 255)
+GREEN = (0, 255, 0)
+RED = (255, 0, 0)
+MAGENTA = (255, 0, 255)
+CYAN = (0, 255, 255)
+ORANGE = (255, 165, 0)
 
 def generate_manual_polygon(manual_radii, manual_angles_deg, rotation_deg=0, size=(800, 800),
                             texture_path=None):
@@ -72,7 +81,7 @@ def generate_auto_polygon(num_vertices=None, step=0,  rotation_deg=0, target_idx
     mask_draw = ImageDraw.Draw(mask)
 
     center_x, center_y = size[0] // 2, size[1] // 2
-    base_radius = 200
+    base_radius = 150
     rotation_rad = math.radians(rotation_deg)
 
     points = []
@@ -195,19 +204,9 @@ def run_full_experiment(trial_list, display_duration_sec=3, debug=False,
     sw, sh = screen.get_size()
     center_x, center_y = sw // 2, sh // 2
 
-    # Define basic colors
-    WHITE = (255, 255, 255)
-    GREY = BG_GREY
-    BLACK = (0, 0, 0)
-    BLUE = (0, 0, 255)
-    GREEN = (0, 255, 0)
-    RED = (255, 0, 0)
-    MAGENTA = (255, 0, 255)
-    CYAN = (0, 255, 255)
-    ORANGE = (255, 165, 0)
 
     # 2. Define Grids
-    grid_size = int(sh * 0.8)
+    grid_size = int(sh * 0.6)
     start_x, end_x = center_x - (grid_size // 2), center_x + (grid_size // 2)
     start_y, end_y = center_y - (grid_size // 2), center_y + (grid_size // 2)
 
@@ -216,7 +215,7 @@ def run_full_experiment(trial_list, display_duration_sec=3, debug=False,
         np.linspace(start_y, end_y, 3, dtype=int)
     ))
 
-    mini_grid_size = int(sh * 0.2)
+    mini_grid_size = int(sh * 0.4)
     m_start_x, m_end_x = center_x - (mini_grid_size // 2), center_x + (mini_grid_size // 2)
     m_start_y, m_end_y = center_y - (mini_grid_size // 2), center_y + (mini_grid_size // 2)
 
