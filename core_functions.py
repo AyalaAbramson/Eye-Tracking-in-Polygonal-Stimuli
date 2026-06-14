@@ -215,7 +215,7 @@ def run_full_experiment(trial_list, display_duration_sec=3, debug=False,
         np.linspace(start_y, end_y, 3, dtype=int)
     ))
 
-    mini_grid_size = int(sh * 0.4)
+    mini_grid_size = int(sh * 0.2)
     m_start_x, m_end_x = center_x - (mini_grid_size // 2), center_x + (mini_grid_size // 2)
     m_start_y, m_end_y = center_y - (mini_grid_size // 2), center_y + (mini_grid_size // 2)
 

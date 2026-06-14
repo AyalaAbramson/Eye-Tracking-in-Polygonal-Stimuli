@@ -28,8 +28,8 @@ TRIAL_REPETITIONS = 1    # Number of times each generated shape repeats
 DEBUG_MODE = False
 
 # --- EyeLink 1000 Plus configuration ---
-USE_EYELINK = False            # Set False for a behavioural-only test (no tracker).
-EYELINK_DUMMY_MODE = True      # True = simulate a tracker (no hardware) for testing.
+USE_EYELINK = True            # Set False for a behavioural-only test (no tracker).
+EYELINK_DUMMY_MODE = False      # True = simulate a tracker (no hardware) for testing.
 EYELINK_ADDRESS = "100.1.1.1"  # EyeLink 1000 Plus default Host PC address.
 CALIBRATION_TYPE = "HV9"       # HV3 / HV5 / HV9 / HV13.
 BINOCULAR = False              # Record one eye.
