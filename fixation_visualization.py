@@ -1,23 +1,99 @@
 """
 Visualize eye-tracking fixations overlaid on target polygon stimuli.
 
-All trials are identical across participants, so the same `target_trial` can be
-compared across sessions. The module exposes two visualization modes:
+All trials are identical across participants, so the same trial can be compared
+across sessions. The module exposes three visualization modes:
 
-    - plot_single_subject(session_folder, target_trial)
-    - plot_aggregated_subjects(root_dir, target_trial)
+    - plot_single_subject(session_folder, target_trial)   one subject, one trial
+    - plot_aggregated_subjects(root_dir, target_trial)    all subjects, one trial
+    - plot_multi_trials(root_dir, ...)                    several trials, side by side
+
+Fixations can be drawn as a scatter or as a density heatmap, and the multi-trial
+mode can lay out either all rotations of one polygon, or all variations (steps)
+of one vertex-count at a fixed rotation.
 
 Time synchronization between the EyeLink clock (ASC file) and the experiment
 clock (CSV) is performed using the first ``TRIAL_START`` sync message.
+
+>>> Edit the CONFIGURATION block below to choose what to plot, then run the file.
 """
 
 import os
 import glob
-import json
+import math
 
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.stats import gaussian_kde
 from shapely.geometry import Polygon
+
+
+# =====================================================================
+# CONFIGURATION  (edit here, then run the file -- see main() at bottom)
+# =====================================================================
+
+# --- Paths ---
+ROOT_DIR = r'C:\Users\User\Desktop\Analysis\data\raw'
+# One example session, used for single-subject mode and for reading the trial
+# list in multi-trial mode (trials are identical across participants).
+EXAMPLE_SESSION = os.path.join(
+    ROOT_DIR, 'participant_315328062', 'session_20260611_153617')
+
+# --- Stimulus geometry (must match run_experiment.py / core_functions.py) ---
+SCREEN_W, SCREEN_H = 2560, 1440   # screen resolution
+IMAGE_SIZE = 1100                 # stimulus image space (run_experiment IMAGE_SIZE)
+BASE_RADIUS = 150                 # base polygon radius (core_functions)
+
+# --- View / zoom ---
+# 'polygon' zooms each panel to the stimulus (+ its fixations) so the polygon is
+# large and easy to analyse; the on-screen position is no longer preserved.
+# 'screen' keeps the true 0..SCREEN_W x 0..SCREEN_H layout.
+VIEW = 'polygon'          # 'polygon' | 'screen'
+VIEW_MARGIN_PX = 120      # padding (px) around the polygon/fixations when zoomed
+
+# --- What to plot ---
+PLOT_MODE = 'multi'      # 'single' | 'aggregated' | 'multi'
+TARGET_TRIAL = 4          # used by 'single' and 'aggregated'
+
+# --- Fixation rendering ---
+FIXATION_STYLE = 'heatmap'   # 'scatter' | 'heatmap'
+HEATMAP_CMAP = 'inferno'    # any matplotlib colormap name
+HEATMAP_GRID = 240          # density grid resolution per axis (higher = smoother)
+HEATMAP_BW = 0.35           # KDE bandwidth scale; larger = smoother/blobbier
+HEATMAP_ALPHA = 0.8         # opacity of the density layer
+HEATMAP_THRESH = 0.08       # hide density below this fraction of the peak
+
+# --- Centroid markers ---
+SHOW_ACTUAL_CENTROID = True   # geometric center of the drawn polygon (yellow)
+SHOW_BASE_CENTROID = True     # intended stimulus center from the CSV (black)
+
+# --- Multi-trial layout (PLOT_MODE == 'multi') ---
+# 'rotations' : fix (sides, step), show every rotation of that polygon.
+# 'variations': fix (sides, rotation), show every step/variation at that rotation.
+MULTI_GROUP_BY = 'rotations'
+MULTI_SIDES = 5           # number of polygon vertices to select
+MULTI_STEP = 4            # used when MULTI_GROUP_BY == 'rotations'
+MULTI_ROTATION = 0        # used when MULTI_GROUP_BY == 'variations'
+MULTI_AGGREGATE = True    # True: pool fixations across all sessions; False: EXAMPLE_SESSION only
+# Each geometric polygon was shown twice: once image-filled, once not. Choose
+# which to display so the figure is not overcrowded.
+MULTI_FILL = 'filled'     # 'filled' | 'unfilled' | 'both'
+
+# --- Experiment trial-generation parameters (mirror run_experiment.py) ---
+# The CSV does not store the image-fill flag, but the trial order is fully
+# determined by these values plus the seeded shuffle, so fill is recoverable.
+# Keep these in sync with run_experiment.py if that file changes.
+EXP_SEED = 42
+EXP_POLYGON_TYPES = [5, 6, 7]
+EXP_STEPS = [-1, 0, 1, 3, 4]      # 0 = flat edge; 1 = no stretch (single rotation)
+EXP_ROTATIONS = [0, 45, 90, 135, 180]
+EXP_FILL_OPTIONS = [True, False]
+EXP_TRIAL_REPETITIONS = 1
+
+# =====================================================================
+# (end configuration)
+# =====================================================================
 
 
 # --------------------------------------------------------------------------- #
@@ -69,8 +145,8 @@ def _read_time_offset(asc_file_path):
 
 def _place_polygon(polygon, offset):
     """
-    Map polygon vertices from the 1100x1100 image space onto the screen by
-    translation only (Offset Mapping) -- no scaling/stretching.
+    Map polygon vertices from the image space onto the screen by translation
+    only (Offset Mapping) -- no scaling/stretching.
 
     The polygon is authored in image space (IMAGE_SIZE in run_experiment.py) and
     the stimulus image is blitted at its top-left corner on screen, so adding
@@ -95,6 +171,156 @@ def _load_trial_row(session_folder, target_trial):
 
 
 # --------------------------------------------------------------------------- #
+# Trial classification (recover sides / rotation / step from polygon geometry)
+# --------------------------------------------------------------------------- #
+def classify_trial(trial_row):
+    """
+    Recover the generative parameters of an auto polygon from its geometry.
+
+    The CSV does not store the vertex count, rotation, or stretch step directly,
+    but they are fully determined by the points (see generate_auto_polygon):
+        - sides    = number of vertices.
+        - rotation = angle of base vertex 0 about the image center (deg).
+        - step     = stretch applied to vertex 0 (target vertex). -1 = collapsed.
+
+    Returns a dict {'sides', 'rotation', 'step'} or None if there is no polygon.
+    """
+    base = parse_polygon_str(trial_row.get('polygon_base_points_imgspace'))
+    actual = parse_polygon_str(trial_row.get('polygon_points_imgspace'))
+    if not base or len(base) < 3:
+        return None
+
+    sides = len(base)
+    cx = cy = IMAGE_SIZE / 2.0
+
+    # Rotation: vertex 0 sits at angle (-pi/2 + rotation_rad) about the center.
+    bx0, by0 = base[0]
+    rotation_rad = math.atan2(by0 - cy, bx0 - cx) + (math.pi / 2.0)
+    rotation = round(math.degrees(rotation_rad)) % 360
+
+    # Step: radius of the (stretched) target vertex 0 relative to the flat edge.
+    step = None
+    if actual:
+        r0 = math.hypot(actual[0][0] - cx, actual[0][1] - cy)
+        flat_radius = BASE_RADIUS * math.cos(2 * math.pi / sides)
+        delta = BASE_RADIUS - flat_radius
+        if r0 < 1.0:
+            step = -1                       # fully collapsed vertex
+        elif delta != 0:
+            step = round((r0 - flat_radius) / delta)
+
+    return {'sides': sides, 'rotation': rotation, 'step': step}
+
+
+def trial_param_table(session_folder):
+    """Return a list of {'trial_index', 'sides', 'rotation', 'step'} for a session."""
+    trials_csv_path = os.path.join(session_folder, 'trials.csv')
+    df = pd.read_csv(trials_csv_path)
+    df = df[df['trial_index'].notna()].copy()
+    df['trial_index'] = df['trial_index'].astype(int)
+
+    table = []
+    for _i, row in df.iterrows():
+        params = classify_trial(row)
+        if params is None:
+            continue
+        params['trial_index'] = int(row['trial_index'])
+        table.append(params)
+    return table
+
+
+def build_fill_map():
+    """
+    Reconstruct {trial_index -> {'sides','step','rotation','is_filled'}}.
+
+    The CSV stores no image-fill flag, but the experiment assigns trial_index by
+    1-based position in the auto-combos list (see run_full_experiment), and that
+    list is produced by the deterministic, seeded shuffle below. Replaying it
+    therefore recovers each trial's fill state. Geometry (sides/step/rotation) is
+    included so callers can validate the mapping against the actual CSV points.
+    """
+    import random
+
+    def get_rotations(step):
+        # step == 1 has no stretch, so all rotations look identical -> use one.
+        return [EXP_ROTATIONS[0]] if step == 1 else EXP_ROTATIONS
+
+    base_combos = [
+        (sides, step, rot, is_filled)
+        for sides in EXP_POLYGON_TYPES
+        for step in EXP_STEPS
+        for rot in get_rotations(step)
+        for is_filled in EXP_FILL_OPTIONS
+    ]
+    combos = base_combos * EXP_TRIAL_REPETITIONS
+    random.seed(EXP_SEED)
+    random.shuffle(combos)
+
+    return {
+        i + 1: {'sides': s, 'step': st, 'rotation': rot % 360, 'is_filled': fill}
+        for i, (s, st, rot, fill) in enumerate(combos)
+    }
+
+
+def select_trials(session_folder, group_by, sides, step=None, rotation=None,
+                  fill='both'):
+    """
+    Select trial indices for a multi-trial figure.
+
+    group_by == 'rotations' : keep trials with the given `sides` and `step`,
+                              return them ordered by rotation (all rotations of
+                              the same polygon).
+    group_by == 'variations': keep trials with the given `sides` and `rotation`,
+                              return them ordered by step (all variations of the
+                              same vertex-count at one rotation).
+
+    fill == 'filled' | 'unfilled' | 'both' restricts to image-filled polygons,
+    plain (black) polygons, or both. The fill flag is recovered from the seeded
+    trial order (build_fill_map) and validated against each trial's geometry.
+
+    Returns a list of param dicts (each with 'trial_index' and 'is_filled')
+    ordered by the varying parameter.
+    """
+    table = trial_param_table(session_folder)
+    fill_map = build_fill_map()
+    mismatches = 0
+    matches = []
+    for t in table:
+        if t['sides'] != sides:
+            continue
+        if group_by == 'rotations' and t['step'] != step:
+            continue
+        if group_by == 'variations' and t['rotation'] != rotation % 360:
+            continue
+
+        # Recover the fill flag, but only trust it when the reconstructed
+        # geometry matches the CSV geometry for this trial_index.
+        combo = fill_map.get(t['trial_index'])
+        is_filled = None
+        if (combo and combo['sides'] == t['sides']
+                and combo['step'] == t['step']
+                and combo['rotation'] == t['rotation']):
+            is_filled = combo['is_filled']
+        elif combo is not None:
+            mismatches += 1
+
+        t = dict(t, is_filled=is_filled)
+        if fill == 'filled' and is_filled is not True:
+            continue
+        if fill == 'unfilled' and is_filled is not False:
+            continue
+        matches.append(t)
+
+    if mismatches and fill != 'both':
+        print(f"Warning: fill mapping disagreed with geometry on {mismatches} "
+              f"trial(s); EXP_* config may be out of sync with run_experiment.py.")
+
+    sort_key = 'rotation' if group_by == 'rotations' else 'step'
+    matches.sort(key=lambda t: (t[sort_key] is None, t[sort_key]))
+    return matches
+
+
+# --------------------------------------------------------------------------- #
 # Core extraction
 # --------------------------------------------------------------------------- #
 def extract_valid_fixations(session_folder, target_trial):
@@ -109,8 +335,8 @@ def extract_valid_fixations(session_folder, target_trial):
         4. Keep only fixations whose aligned_start_s is within the stim window.
 
     Returns a dict with keys:
-        'x', 'y'            -> lists of fixation coordinates (image space)
-        'polygon'           -> list of (x, y) vertices
+        'x', 'y'            -> lists of fixation coordinates (screen pixels)
+        'polygon'           -> list of (x, y) vertices (offset-mapped to screen)
         'base_centroid'     -> (stim_center_x_px, stim_center_y_px) from the CSV
         'stim_on', 'stim_off'
         'time_offset'
@@ -188,9 +414,68 @@ def find_session_folders(root_dir):
     return sorted(sessions)
 
 
+def collect_fixations(target_trial, sessions):
+    """
+    Pool valid fixations for `target_trial` across one or more sessions.
+
+    Returns (x, y, polygon, base_centroid, n_sessions). The polygon and base
+    centroid come from the first session that provides them (identical across
+    participants).
+    """
+    all_x, all_y = [], []
+    polygon = []
+    base_centroid = None
+    n_sessions = 0
+
+    for session_folder in sessions:
+        data = extract_valid_fixations(session_folder, target_trial)
+        if data is None:
+            continue
+        n_sessions += 1
+        all_x.extend(data['x'])
+        all_y.extend(data['y'])
+        if not polygon and data['polygon']:
+            polygon = data['polygon']
+        if base_centroid is None:
+            base_centroid = data['base_centroid']
+
+    return all_x, all_y, polygon, base_centroid, n_sessions
+
+
 # --------------------------------------------------------------------------- #
 # Plotting helpers
 # --------------------------------------------------------------------------- #
+def _square_bounds(cx, cy, half, margin=0.0):
+    """Return a square view (xmin, xmax, ymin, ymax) centered on (cx, cy)."""
+    half = max(half + margin, 1.0)
+    return (cx - half, cx + half, cy - half, cy + half)
+
+
+def _actual_centroid(polygon):
+    """Geometric centroid (x, y) of the polygon, or None if it is degenerate."""
+    if polygon and len(polygon) >= 3:
+        c = Polygon(polygon).centroid
+        return (c.x, c.y)
+    return None
+
+
+def _image_bounds(polygon, base_centroid):
+    """
+    Default square view for a SINGLE plot: an IMAGE_SIZE-wide window centered on
+    the stimulus (its base centroid), i.e. the on-screen footprint of the
+    stimulus image. Used when there is nothing else in the set to compare to.
+    """
+    if base_centroid is not None:
+        cx, cy = base_centroid
+    elif polygon:
+        xs = [p[0] for p in polygon]
+        ys = [p[1] for p in polygon]
+        cx, cy = (min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0
+    else:
+        cx, cy = SCREEN_W / 2.0, SCREEN_H / 2.0
+    return _square_bounds(cx, cy, IMAGE_SIZE / 2.0)
+
+
 def _draw_polygon(ax, polygon):
     """Draw polygon outline + light fill, and return its centroid (x, y)."""
     if not polygon:
@@ -199,8 +484,9 @@ def _draw_polygon(ax, polygon):
     px, py = zip(*polygon)
     px_closed = list(px) + [px[0]]
     py_closed = list(py) + [py[0]]
+    # Boundary at a high zorder so it stays visible over a heatmap.
     ax.plot(px_closed, py_closed, color='#2C3E50', linewidth=2.5,
-            label='Polygon boundary', zorder=2)
+            label='Polygon boundary', zorder=6)
     ax.fill(px_closed, py_closed, color='#3498DB', alpha=0.15,
             label='Polygon interior', zorder=1)
 
@@ -208,6 +494,68 @@ def _draw_polygon(ax, polygon):
         centroid = Polygon(polygon).centroid
         return (centroid.x, centroid.y)
     return None
+
+
+def _draw_fixations(ax, x, y, style, color, alpha, label, bounds=None):
+    """
+    Draw fixations either as a scatter or a smooth density heatmap.
+
+    The heatmap uses a Gaussian kernel density estimate (KDE) evaluated on a
+    fine grid, so it renders as an organic 'blob' that follows the fixation
+    distribution instead of the blocky bins a 2D histogram produces.
+
+    `bounds` (xmin, xmax, ymin, ymax) restricts the KDE grid to the view region
+    so the density stays sharp when zoomed in; None uses the full screen.
+
+    Returns the heatmap mappable (for an optional colorbar), or None.
+    """
+    if not x:
+        return None
+
+    if style == 'heatmap':
+        return _draw_kde_heatmap(ax, x, y, bounds)
+
+    ax.scatter(x, y, color=color, s=60, alpha=alpha,
+               edgecolors='white', linewidths=0.4, label=label, zorder=5)
+    return None
+
+
+def _draw_kde_heatmap(ax, x, y, bounds=None):
+    """
+    Render a smooth Gaussian-KDE density of the fixations.
+
+    The density is evaluated on a grid spanning `bounds` (or the full screen when
+    None). Falls back to a scatter when there are too few distinct points to
+    estimate a 2D density (KDE needs a non-degenerate point cloud).
+    """
+    pts = np.vstack([x, y])
+    # gaussian_kde needs at least 3 points that are not all collinear/identical;
+    # guard against the singular-covariance error on tiny samples.
+    if pts.shape[1] < 3 or np.linalg.matrix_rank(pts - pts.mean(axis=1, keepdims=True)) < 2:
+        ax.scatter(x, y, color='#E74C3C', s=60, alpha=0.85,
+                   edgecolors='white', linewidths=0.4, label='Fixations', zorder=5)
+        return None
+
+    kde = gaussian_kde(pts, bw_method=HEATMAP_BW)
+
+    x0, x1, y_top, y_bottom = bounds if bounds else (0, SCREEN_W, 0, SCREEN_H)
+    gx = np.linspace(x0, x1, HEATMAP_GRID)
+    gy = np.linspace(y_top, y_bottom, HEATMAP_GRID)
+    mesh_x, mesh_y = np.meshgrid(gx, gy)
+    density = kde(np.vstack([mesh_x.ravel(), mesh_y.ravel()])).reshape(mesh_x.shape)
+
+    # Mask away near-zero density so the blob blends into the background instead
+    # of tinting the whole panel.
+    peak = density.max()
+    if peak > 0:
+        density = np.ma.masked_less(density, HEATMAP_THRESH * peak)
+
+    # imshow with origin='upper' matches the inverted (top-left origin) Y axis.
+    mappable = ax.imshow(
+        density, extent=[x0, x1, y_bottom, y_top], origin='upper',
+        cmap=HEATMAP_CMAP, alpha=HEATMAP_ALPHA, aspect='auto',
+        interpolation='bilinear', zorder=2)
+    return mappable
 
 
 def _draw_centroid(ax, actual_centroid, base_centroid,
@@ -226,51 +574,90 @@ def _draw_centroid(ax, actual_centroid, base_centroid,
                    label='Actual centroid', zorder=11)
     if show_base and base_centroid is not None:
         ax.scatter([base_centroid[0]], [base_centroid[1]], color='black',
-                   s=size, marker='o', edgecolors='black', linewidths=2.0,
-                   label='Base centroid', zorder=11)
+                   s=size, marker='o', edgecolors='white', linewidths=1.0,
+                   label='Base centroid', zorder=12)
 
 
-def _format_axes(ax, title):
-    """Apply shared image-space formatting (inverted Y, fixed limits)."""
-    ax.set_title(title, fontsize=14, pad=15)
-    ax.set_xlabel('X coordinate (pixels)', fontsize=11)
-    ax.set_ylabel('Y coordinate (pixels)', fontsize=11)
-    ax.set_xlim(0, 2560)
-    ax.set_ylim(1440, 0)          # invert Y: (0,0) at the top-left
+def _format_axes(ax, title, legend=True, bounds=None, title_fontsize=12):
+    """
+    Apply shared formatting (inverted Y axis). When `bounds` is given the view
+    is zoomed to it; otherwise the full screen (0..SCREEN_W x 0..SCREEN_H).
+    """
+    ax.set_title(title, fontsize=title_fontsize, pad=6)
+    ax.set_xlabel('X coordinate (pixels)', fontsize=9)
+    ax.set_ylabel('Y coordinate (pixels)', fontsize=9)
+    ax.tick_params(labelsize=8)
+    if bounds:
+        x0, x1, y_top, y_bottom = bounds
+        ax.set_xlim(x0, x1)
+        ax.set_ylim(y_bottom, y_top)   # invert Y: smaller y at the top
+    else:
+        ax.set_xlim(0, SCREEN_W)
+        ax.set_ylim(SCREEN_H, 0)       # invert Y: (0,0) at the top-left
     ax.set_aspect('equal', adjustable='box')
     ax.grid(True, linestyle=':', alpha=0.6)
-    ax.legend(loc='upper right', frameon=True, shadow=True)
+    if legend:
+        ax.legend(loc='upper right', frameon=True, shadow=True, fontsize=8)
+
+
+def _draw_trial_data(ax, x, y, polygon, base_centroid, title, fixation_style,
+                     color, alpha, show_actual, show_base, bounds,
+                     legend=True, title_fontsize=12):
+    """Draw one trial's polygon + fixations + centroids using explicit `bounds`.
+
+    `bounds` (xmin, xmax, ymin, ymax) is applied verbatim, so callers can share
+    one global window across a set of panels. Aspect is forced to 'equal' in
+    _format_axes, keeping polygons geometrically proportioned at any scale.
+    """
+    actual_centroid = _draw_polygon(ax, polygon)
+    mappable = _draw_fixations(ax, x, y, fixation_style, color, alpha,
+                               label='Fixations', bounds=bounds)
+    _draw_centroid(ax, actual_centroid, base_centroid,
+                   show_actual=show_actual, show_base=show_base)
+    _format_axes(ax, title, legend=legend, bounds=bounds,
+                 title_fontsize=title_fontsize)
+    return len(x), mappable
+
+
+def _render_trial(ax, target_trial, sessions, title, fixation_style,
+                  color, alpha, show_actual, show_base, legend=True,
+                  title_fontsize=12, bounds=None):
+    """Collect and draw a single trial onto `ax`.
+
+    When `bounds` is None and VIEW == 'polygon', the view defaults to the
+    IMAGE_SIZE-wide stimulus window (a single plot has nothing to compare
+    against). Pass explicit `bounds` to share one window across a set.
+    """
+    x, y, polygon, base_centroid, _n = collect_fixations(target_trial, sessions)
+
+    if bounds is None and VIEW == 'polygon':
+        bounds = _image_bounds(polygon, base_centroid)
+
+    return _draw_trial_data(ax, x, y, polygon, base_centroid, title,
+                            fixation_style, color, alpha, show_actual, show_base,
+                            bounds, legend=legend, title_fontsize=title_fontsize)
 
 
 # --------------------------------------------------------------------------- #
 # Mode A: single subject
 # --------------------------------------------------------------------------- #
 def plot_single_subject(session_folder, target_trial,
-                        show_actual=True, show_base=True):
-    """Plot the polygon + valid fixations for one participant / one trial.
-
-    show_actual / show_base toggle the actual (polygon) and base (CSV) centroids.
-    """
-    data = extract_valid_fixations(session_folder, target_trial)
-    if data is None:
-        print(f"Trial {target_trial} not found in {session_folder}")
-        return
-
-    print(f"[single] {os.path.basename(session_folder)}: "
-          f"{len(data['x'])} valid fixations "
-          f"(offset={data['time_offset']:.3f}s)")
-
+                        fixation_style=FIXATION_STYLE,
+                        show_actual=SHOW_ACTUAL_CENTROID,
+                        show_base=SHOW_BASE_CENTROID):
+    """Plot the polygon + valid fixations for one participant / one trial."""
     fig, ax = plt.subplots(figsize=(9, 9))
-    centroid = _draw_polygon(ax, data['polygon'])
+    n_fix, mappable = _render_trial(
+        ax, target_trial, [session_folder],
+        title=f"Fixations - Trial {target_trial}\n"
+              f"{os.path.basename(session_folder)}",
+        fixation_style=fixation_style, color='#2ECC71', alpha=0.85,
+        show_actual=show_actual, show_base=show_base)
 
-    if data['x']:
-        ax.scatter(data['x'], data['y'], color='#2ECC71', s=70, alpha=0.85,
-                   edgecolors='white', label='Fixations', zorder=5)
-
-    _draw_centroid(ax, centroid, data['base_centroid'],
-                   show_actual=show_actual, show_base=show_base)
-    _format_axes(ax, f"Fixations - Trial {target_trial}\n"
-                     f"{os.path.basename(session_folder)}")
+    print(f"[single] {os.path.basename(session_folder)}: {n_fix} valid fixations")
+    if mappable is not None:
+        fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.04,
+                     label='Fixation density')
     plt.tight_layout()
     plt.show()
 
@@ -279,74 +666,163 @@ def plot_single_subject(session_folder, target_trial,
 # Mode B: aggregated subjects
 # --------------------------------------------------------------------------- #
 def plot_aggregated_subjects(root_dir, target_trial,
-                             show_actual=True, show_base=True):
+                             fixation_style=FIXATION_STYLE,
+                             show_actual=SHOW_ACTUAL_CENTROID,
+                             show_base=SHOW_BASE_CENTROID):
     """
     Plot valid fixations for `target_trial` across ALL sessions under root_dir.
 
-    The polygon is identical across participants, so the first session that
-    provides one defines the drawn polygon and centroids. Low scatter alpha
-    reveals fixation density where points overlap. show_actual / show_base
-    toggle the actual (polygon) and base (CSV) centroids.
+    Low scatter alpha (or the heatmap style) reveals fixation density where
+    points overlap.
     """
     sessions = find_session_folders(root_dir)
     if not sessions:
         print(f"No session folders found under {root_dir}")
         return
 
-    all_x = []
-    all_y = []
-    polygon = []
-    base_centroid = None
-    n_sessions = 0
-
-    for session_folder in sessions:
-        data = extract_valid_fixations(session_folder, target_trial)
-        print(f"Session {session_folder} - Center: {data['base_centroid']}")
-        if data is None:
-            continue
-        n_sessions += 1
-        all_x.extend(data['x'])
-        all_y.extend(data['y'])
-        if not polygon and data['polygon']:
-            polygon = data['polygon']
-        if base_centroid is None:
-            base_centroid = data['base_centroid']
-        print(f"[agg] {os.path.basename(session_folder)}: "
-              f"{len(data['x'])} valid fixations")
-
-    print(f"[agg] {len(all_x)} fixations from {n_sessions} sessions "
-          f"for trial {target_trial}")
-
     fig, ax = plt.subplots(figsize=(9, 9))
-    centroid = _draw_polygon(ax, polygon)
+    n_fix, mappable = _render_trial(
+        ax, target_trial, sessions,
+        title=f"Aggregated fixations - Trial {target_trial}\n"
+              f"{len(sessions)} sessions",
+        fixation_style=fixation_style, color='#E74C3C', alpha=0.25,
+        show_actual=show_actual, show_base=show_base)
 
-    if all_x:
-        ax.scatter(all_x, all_y, color='#E74C3C', s=55, alpha=0.25,
-                   edgecolors='none',
-                   label=f'Fixations ({n_sessions} subjects)', zorder=5)
-
-    _draw_centroid(ax, centroid, base_centroid,
-                   show_actual=show_actual, show_base=show_base)
-    _format_axes(ax, f"Aggregated fixations - Trial {target_trial}\n"
-                     f"{n_sessions} subjects")
+    print(f"[agg] {n_fix} fixations from {len(sessions)} sessions "
+          f"for trial {target_trial}")
+    if mappable is not None:
+        fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.04,
+                     label='Fixation density')
     plt.tight_layout()
     plt.show()
 
 
 # --------------------------------------------------------------------------- #
-# Entry point
+# Mode C: several trials side by side
+# --------------------------------------------------------------------------- #
+def plot_multi_trials(root_dir, group_by=MULTI_GROUP_BY, sides=MULTI_SIDES,
+                      step=MULTI_STEP, rotation=MULTI_ROTATION,
+                      aggregate=MULTI_AGGREGATE, fill=MULTI_FILL,
+                      fixation_style=FIXATION_STYLE,
+                      show_actual=SHOW_ACTUAL_CENTROID,
+                      show_base=SHOW_BASE_CENTROID):
+    """
+    Plot several related trials side by side in a single figure.
+
+    group_by == 'rotations' : every rotation of the polygon (sides, step).
+    group_by == 'variations': every variation/step of `sides` vertices at the
+                              fixed `rotation`.
+
+    fill == 'filled' | 'unfilled' | 'both' restricts to image-filled polygons,
+    plain (black) polygons, or both. Each panel title notes its fill state.
+
+    Fixations are pooled across all sessions when `aggregate` is True, otherwise
+    only EXAMPLE_SESSION is used.
+    """
+    sessions = find_session_folders(root_dir) if aggregate else [EXAMPLE_SESSION]
+    if not sessions:
+        print(f"No session folders found under {root_dir}")
+        return
+
+    # Use one session's CSV to enumerate trials (identical across participants).
+    selected = select_trials(EXAMPLE_SESSION, group_by, sides,
+                              step=step, rotation=rotation, fill=fill)
+    if not selected:
+        print(f"No trials matched group_by={group_by!r}, sides={sides}, "
+              f"step={step}, rotation={rotation}, fill={fill!r}.")
+        return
+
+    n = len(selected)
+    ncols = min(n, 3)
+    nrows = math.ceil(n / ncols)
+    # constrained_layout (not tight_layout) cleanly makes room for the per-panel
+    # colorbars without the "Axes not compatible with tight_layout" warning.
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 6 * nrows),
+                             squeeze=False, constrained_layout=True)
+    flat_axes = [ax for row in axes for ax in row]
+
+    color = '#E74C3C' if aggregate else '#2ECC71'
+    alpha = 0.25 if aggregate else 0.85
+    varying = 'rotation' if group_by == 'rotations' else 'step'
+
+    def fill_label(is_filled):
+        return {True: 'filled', False: 'unfilled'}.get(is_filled, 'fill unknown')
+
+    # Pre-collect every panel's data so we can derive ONE shared window before
+    # drawing. panels: list of (params, x, y, polygon, base_centroid).
+    panels = []
+    for params in selected:
+        x, y, polygon, base_centroid, _n = collect_fixations(
+            params['trial_index'], sessions)
+        panels.append((params, x, y, polygon, base_centroid))
+
+    # Center every polygon on its own actual centroid, using one uniform window
+    # size so all panels stay the same scale and directly comparable. The size
+    # is driven by the largest polygon (its farthest vertex from the centroid),
+    # so each polygon is centered and fully shown. (VIEW == 'screen' keeps the
+    # full screen instead.)
+    centers = [_actual_centroid(p[3]) or p[4] for p in panels]
+    half = 0.0
+    for (_params, _x, _y, polygon, _b), c in zip(panels, centers):
+        if c is None:
+            continue
+        for px, py in polygon:
+            half = max(half, abs(px - c[0]), abs(py - c[1]))
+    half = (half or IMAGE_SIZE / 2.0) + VIEW_MARGIN_PX
+    use_screen = (VIEW == 'screen')
+
+    for ax, (params, x, y, polygon, base_centroid), center in zip(
+            flat_axes, panels, centers):
+        ti = params['trial_index']
+        panel_title = (f"Trial {ti} ({fill_label(params['is_filled'])})\n"
+                       f"{params['sides']} sides, rot {params['rotation']}, "
+                       f"step {params['step']}")
+        bounds = (None if use_screen or center is None
+                  else _square_bounds(center[0], center[1], half))
+        _n_fix, mappable = _draw_trial_data(
+            ax, x, y, polygon, base_centroid, panel_title,
+            fixation_style=fixation_style, color=color, alpha=alpha,
+            show_actual=show_actual, show_base=show_base, bounds=bounds,
+            legend=False, title_fontsize=9)
+        # A small colorbar beside each panel, so it never overlaps the data.
+        if mappable is not None:
+            cbar = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.04,
+                                shrink=0.7)
+            cbar.ax.tick_params(labelsize=6)
+            cbar.set_label('Fixation density', fontsize=7)
+
+    # Hide any unused axes in the grid.
+    for ax in flat_axes[n:]:
+        ax.axis('off')
+
+    fixed = (f"{sides} sides, step {step}" if group_by == 'rotations'
+             else f"{sides} sides, rotation {rotation}")
+    fill_title = {'filled': 'image-filled', 'unfilled': 'unfilled',
+                  'both': 'filled + unfilled'}.get(fill, fill)
+    fig.suptitle(f"Multi-trial ({group_by}) - {fixed}  |  {fill_title}  |  "
+                 f"varying {varying}  |  {len(sessions)} session(s)", fontsize=14)
+
+    # Shared legend (scatter style only) from the first populated panel.
+    handles, labels = flat_axes[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc='upper right', fontsize=9)
+
+    plt.show()
+
+
+# --------------------------------------------------------------------------- #
+# Entry point -- driven by the CONFIGURATION block at the top of the file
 # --------------------------------------------------------------------------- #
 def main():
-    root_dir = r'C:\Users\User\Desktop\Analysis\data\raw'
-    target_trial = 3
-
-    # Mode A: a single session (one participant).
-    example_session = os.path.join(
-        root_dir, 'participant_315328062', 'session_20260611_153617')
-    #plot_single_subject(example_session, target_trial)
-
-    # Mode B: every session under the root directory.
-    plot_aggregated_subjects(root_dir, target_trial)
+    if PLOT_MODE == 'single':
+        plot_single_subject(EXAMPLE_SESSION, TARGET_TRIAL)
+    elif PLOT_MODE == 'aggregated':
+        plot_aggregated_subjects(ROOT_DIR, TARGET_TRIAL)
+    elif PLOT_MODE == 'multi':
+        plot_multi_trials(ROOT_DIR)
+    else:
+        print(f"Unknown PLOT_MODE={PLOT_MODE!r}. "
+              f"Use 'single', 'aggregated', or 'multi'.")
 
 
 if __name__ == '__main__':
