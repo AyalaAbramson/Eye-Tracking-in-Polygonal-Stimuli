@@ -92,19 +92,19 @@ SHOW_GAUSSIAN_ELLIPSE = True  # overlay the fitted confidence ellipse
 ELLIPSE_N_STD = 1.8           # ellipse radius in standard deviations (~95% at 2)
 ELLIPSE_ONLY = False          # draw ONLY the ellipse + polygon (hide fixations);
                               # the title then lists the fitted parameters
-SHOW_STATS_PLOT = False       # in 'multi' mode, also emit the statistical-inference plot
+SHOW_STATS_PLOT = True       # in 'multi' mode, also emit the statistical-inference plot
 
 # --- Multi-trial layout (PLOT_MODE == 'multi') ---
 # 'rotations' : fix (sides, step), show every rotation of that polygon.
 # 'variations': fix (sides, rotation), show every step/variation at that rotation.
-MULTI_GROUP_BY = 'variations'
-MULTI_SIDES = 7       # number of polygon vertices to select
+MULTI_GROUP_BY = 'rotations'
+MULTI_SIDES = 5       # number of polygon vertices to select
 MULTI_STEP = 4            # used when MULTI_GROUP_BY == 'rotations'
 MULTI_ROTATION = 0        # used when MULTI_GROUP_BY == 'variations'
 MULTI_AGGREGATE = True    # True: pool fixations across all sessions; False: EXAMPLE_SESSION only
 # Each geometric polygon was shown twice: once image-filled, once not. Choose
 # which to display so the figure is not overcrowded.
-MULTI_FILL = 'filled'     # 'filled' | 'unfilled' | 'both'
+MULTI_FILL = 'both'     # 'filled' | 'unfilled' | 'both'
 
 # --- Experiment trial-generation parameters (mirror run_experiment.py) ---
 # The CSV does not store the image-fill flag, but the trial order is fully
@@ -756,9 +756,10 @@ def _draw_gaussian_ellipse(ax, stats, color='#00E5FF'):
         linewidth=2.2, linestyle='-', zorder=9,
         label=f"Gaussian {stats['n_std']:.0f}σ")
     ax.add_patch(ellipse)
-    # Mark the distribution mean (ellipse center).
-    ax.scatter([stats['mean'][0]], [stats['mean'][1]], color=color, s=30,
-               marker='x', linewidths=1.6, zorder=10)
+    # Mark the distribution mean (ellipse center) on top of everything else
+    # (above the centroid markers and fixations).
+    ax.scatter([stats['mean'][0]], [stats['mean'][1]], color=color, s=40,
+               marker='x', linewidths=2.0, zorder=20)
 
 
 def _draw_centroid(ax, actual_centroid, base_centroid,
@@ -997,7 +998,11 @@ def plot_multi_statistics(stats_records, group_by, fill):
             ys = list(np.degrees(np.unwrap(np.radians(ys), period=2 * np.pi)))
         unwrapped_y.extend(v for v in ys if v is not None)
         label = _fill_word(is_filled) if len(fills_present) > 1 else None
-        ax.plot(xs, ys, 'o-', label=label)
+        # Single trend line gets a fixed color per metric (orientation vs
+        # centroid offset); multiple conditions keep distinct cycle colors.
+        trend_color = 'cornflowerblue' if group_by == 'rotations' else 'darkslateblue'
+        line_color = trend_color if len(fills_present) == 1 else None
+        ax.plot(xs, ys, 'o-', color=line_color, label=label)
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
@@ -1018,7 +1023,7 @@ def plot_multi_statistics(stats_records, group_by, fill):
     if len(fills_present) > 1:
         ax.legend(title='Condition')
 
-    # ---- Fill comparison: semi-axis lengths, Filled vs Unfilled ------------ #
+    # ---- Fill comparison: mean semi-axis lengths +/- SD, Filled vs Unfilled - #
     if fill == 'both' and {True, False} <= set(fills_present):
         fig2, ax2 = plt.subplots(figsize=(7, 5), constrained_layout=True)
         groups = {
@@ -1028,15 +1033,22 @@ def plot_multi_statistics(stats_records, group_by, fill):
             'Minor\nUnfilled': [r['stats']['semi_minor'] for r in usable if not r['is_filled']],
         }
         labels = list(groups.keys())
-        data = list(groups.values())
-        bp = ax2.boxplot(data, labels=labels, patch_artist=True)
-        # Color major vs minor differently for quick reading.
+        # Mean bar height with SD error bars per group.
+        means = [float(np.mean(v)) if v else 0.0 for v in groups.values()]
+        sds = [float(np.std(v, ddof=1)) if len(v) > 1 else 0.0
+               for v in groups.values()]
+        # Blue for major axes, orange for minor axes (original palette).
         palette = ['#3498DB', '#3498DB', '#E67E22', '#E67E22']
-        for patch, c in zip(bp['boxes'], palette):
-            patch.set_facecolor(c)
-            patch.set_alpha(0.6)
-        ax2.set_ylabel('Semi-axis length (px)')
-        ax2.set_title('Ellipse axis lengths: Filled vs Unfilled')
+        positions = range(len(labels))
+        ax2.bar(positions, means, yerr=sds, color=palette, alpha=0.6,
+                edgecolor='black', linewidth=0.8,
+                capsize=6,                       # flat caps on the error bars
+                error_kw=dict(ecolor='black', elinewidth=1.2, capthick=1.2),
+                zorder=2)
+        ax2.set_xticks(list(positions))
+        ax2.set_xticklabels(labels)
+        ax2.set_ylabel('Mean semi-axis length (px)')
+        ax2.set_title('Mean ellipse axis lengths (±SD): Filled vs Unfilled')
         ax2.grid(True, axis='y', linestyle=':', alpha=0.6)
 
 
@@ -1208,7 +1220,7 @@ def plot_multi_trials(root_dir, group_by=MULTI_GROUP_BY, sides=MULTI_SIDES,
     fill_title = {'filled': 'image-filled', 'unfilled': 'unfilled',
                   'both': 'filled + unfilled'}.get(fill, fill)
     fig.suptitle(f"Multi-trial ({group_by}) - {fixed}  |  {fill_title}  |  "
-                 f"varying {varying}  |  {len(sessions)} session(s)", fontsize=14)
+                 f"varying {varying}  |  {len(sessions)} sessions", fontsize=14)
 
     # Shared legend from the first populated panel, placed OUTSIDE the panels
     # (below the grid) so it never obscures the graphs. constrained_layout
