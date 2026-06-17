@@ -25,8 +25,9 @@ import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
 from scipy.stats import gaussian_kde
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, Point
 
 
 # =====================================================================
@@ -56,8 +57,25 @@ VIEW_MARGIN_PX = 120      # padding (px) around the polygon/fixations when zoome
 PLOT_MODE = 'multi'      # 'single' | 'aggregated' | 'multi'
 TARGET_TRIAL = 4          # used by 'single' and 'aggregated'
 
+# --- Fixation time window ---
+# Saccadic latency: subjects keep fixating the central cross for ~150-250 ms
+# after the polygon appears. Discard fixations that start within this window
+# after stimulus onset so that carry-over central fixation is not counted.
+# Set to 0.0 to keep every in-window fixation.
+STIM_ONSET_LATENCY_S = 0.3   # seconds after stim_on to ignore
+
+# --- Spatial filter: distance from the polygon boundary ---
+# Keep only fixations close to the polygon. None disables the filter; otherwise
+# the value is a distance in pixels, interpreted per FIXATION_BOUNDARY_MODE:
+#   'outside' : drop fixations more than this many px OUTSIDE the polygon
+#               (interior fixations are always kept) -- removes far-away strays.
+#   'band'    : keep only fixations within this distance of the boundary LINE on
+#               either side (drops deep-interior and far-exterior fixations).
+FIXATION_BOUNDARY_DIST_PX = 100     # e.g. 80; None = no spatial filtering
+FIXATION_BOUNDARY_MODE = 'outside'   # 'outside' | 'band'
+
 # --- Fixation rendering ---
-FIXATION_STYLE = 'heatmap'   # 'scatter' | 'heatmap'
+FIXATION_STYLE = 'scatter'   # 'scatter' | 'heatmap'
 HEATMAP_CMAP = 'inferno'    # any matplotlib colormap name
 HEATMAP_GRID = 240          # density grid resolution per axis (higher = smoother)
 HEATMAP_BW = 0.35           # KDE bandwidth scale; larger = smoother/blobbier
@@ -68,11 +86,19 @@ HEATMAP_THRESH = 0.08       # hide density below this fraction of the peak
 SHOW_ACTUAL_CENTROID = True   # geometric center of the drawn polygon (yellow)
 SHOW_BASE_CENTROID = True     # intended stimulus center from the CSV (black)
 
+# --- Bivariate Gaussian (2D normal) modeling ---
+# Fit a 2D Gaussian to the fixation cloud and overlay a confidence ellipse.
+SHOW_GAUSSIAN_ELLIPSE = True  # overlay the fitted confidence ellipse
+ELLIPSE_N_STD = 1.8           # ellipse radius in standard deviations (~95% at 2)
+ELLIPSE_ONLY = False          # draw ONLY the ellipse + polygon (hide fixations);
+                              # the title then lists the fitted parameters
+SHOW_STATS_PLOT = False       # in 'multi' mode, also emit the statistical-inference plot
+
 # --- Multi-trial layout (PLOT_MODE == 'multi') ---
 # 'rotations' : fix (sides, step), show every rotation of that polygon.
 # 'variations': fix (sides, rotation), show every step/variation at that rotation.
-MULTI_GROUP_BY = 'rotations'
-MULTI_SIDES = 5           # number of polygon vertices to select
+MULTI_GROUP_BY = 'variations'
+MULTI_SIDES = 7       # number of polygon vertices to select
 MULTI_STEP = 4            # used when MULTI_GROUP_BY == 'rotations'
 MULTI_ROTATION = 0        # used when MULTI_GROUP_BY == 'variations'
 MULTI_AGGREGATE = True    # True: pool fixations across all sessions; False: EXAMPLE_SESSION only
@@ -155,6 +181,35 @@ def _place_polygon(polygon, offset):
     """
     offset_x, offset_y = offset
     return [(x + offset_x, y + offset_y) for x, y in polygon]
+
+
+def _filter_by_boundary_distance(xs, ys, polygon, dist, mode):
+    """
+    Keep only fixations within `dist` pixels of the polygon, per `mode`.
+
+        'outside' : distance measured to the polygon AREA (0 inside) -- keeps
+                    interior fixations and any within `dist` px outside the edge.
+        'band'    : distance measured to the boundary LINE -- keeps a band of
+                    width `dist` on either side of the edge (drops deep interior
+                    and far exterior).
+
+    Returns the filtered (xs, ys). No-ops when `dist` is None or the polygon has
+    fewer than 3 vertices.
+    """
+    if dist is None or not polygon or len(polygon) < 3:
+        return xs, ys
+
+    poly = Polygon(polygon)
+    if not poly.is_valid:
+        poly = poly.buffer(0)          # repair minor self-intersections
+    ref = poly.exterior if mode == 'band' else poly
+
+    kept_x, kept_y = [], []
+    for x, y in zip(xs, ys):
+        if ref.distance(Point(x, y)) <= dist:
+            kept_x.append(x)
+            kept_y.append(y)
+    return kept_x, kept_y
 
 
 def _load_trial_row(session_folder, target_trial):
@@ -323,7 +378,9 @@ def select_trials(session_folder, group_by, sides, step=None, rotation=None,
 # --------------------------------------------------------------------------- #
 # Core extraction
 # --------------------------------------------------------------------------- #
-def extract_valid_fixations(session_folder, target_trial):
+def extract_valid_fixations(session_folder, target_trial,
+                            boundary_dist=FIXATION_BOUNDARY_DIST_PX,
+                            boundary_mode=FIXATION_BOUNDARY_MODE):
     """
     Extract time-synced, in-window fixations for `target_trial` in a session.
 
@@ -332,7 +389,12 @@ def extract_valid_fixations(session_folder, target_trial):
         2. Compute the clock offset from the first TRIAL_START message.
         3. Parse EFIX lines, align each fixation start to the CSV clock:
                aligned_start_s = (fixation_start_ms / 1000.0) - time_offset
-        4. Keep only fixations whose aligned_start_s is within the stim window.
+        4. Keep only fixations whose aligned_start_s is within the stim window,
+           starting STIM_ONSET_LATENCY_S after onset (to drop the carry-over
+           central cross fixation caused by saccadic latency).
+        5. Optionally keep only fixations within `boundary_dist` px of the
+           polygon boundary (see _filter_by_boundary_distance / the
+           FIXATION_BOUNDARY_* config).
 
     Returns a dict with keys:
         'x', 'y'            -> lists of fixation coordinates (screen pixels)
@@ -384,9 +446,16 @@ def extract_valid_fixations(session_folder, target_trial):
                 continue
 
             aligned_start_s = (fixation_start_ms / 1000.0) - time_offset
-            if stim_on <= aligned_start_s <= stim_off:
+            # Skip the saccade-latency window after onset so the carry-over
+            # central (cross) fixation is not counted.
+            window_start = stim_on + STIM_ONSET_LATENCY_S
+            if window_start <= aligned_start_s <= stim_off:
                 fixations_x.append(x)
                 fixations_y.append(y)
+
+    # Optional spatial filter: keep only fixations near the polygon boundary.
+    fixations_x, fixations_y = _filter_by_boundary_distance(
+        fixations_x, fixations_y, polygon, boundary_dist, boundary_mode)
 
     return {
         'x': fixations_x,
@@ -440,6 +509,125 @@ def collect_fixations(target_trial, sessions):
             base_centroid = data['base_centroid']
 
     return all_x, all_y, polygon, base_centroid, n_sessions
+
+
+# --------------------------------------------------------------------------- #
+# Statistics (pure math -- no plotting)
+# --------------------------------------------------------------------------- #
+def fit_gaussian(x, y, n_std=ELLIPSE_N_STD, ref_point=None):
+    """
+    Fit a bivariate normal distribution to the (x, y) fixation coordinates.
+
+    Uses numpy.mean for the center and numpy.cov for the covariance, then derives
+    the confidence-ellipse geometry from the eigen-decomposition of the
+    covariance matrix (eigenvectors give the axis directions, eigenvalues their
+    variances).
+
+    Orientation in a full 0..360 framework
+    --------------------------------------
+    An eigenvector's sign is arbitrary, so the bare major-axis angle is only
+    defined modulo 180 deg -- which makes line graphs of orientation vs polygon
+    rotation 'wrap' and break beyond 180 deg. To recover a true 0..360 reading we
+    anchor the major-axis direction to the displacement vector from `ref_point`
+    (the stimulus base centroid) to the fixation mean: the major eigenvector is
+    flipped to point into the same half-plane as that displacement, then atan2
+    yields a sign-preserving 0..360 angle.
+
+    Returns a clean dict of computed parameters, or None when there are too few
+    or degenerate points to form a valid (positive-definite) covariance:
+
+        {
+          'mean'        : (mx, my),          # distribution center
+          'cov'         : 2x2 numpy array,
+          'var_x','var_y','cov_xy',          # covariance entries
+          'angle_deg'     : major-axis orientation, [0, 180)  (textbook; ellipse)
+          'angle_deg_360' : direction-resolved orientation, [0, 360)
+          'offset_angle_deg' : direction of (mean - ref_point), [0, 360) or None
+          'offset_dist'   : distance from ref_point to mean (px) or None
+          'semi_major','semi_minor',         # n_std * sqrt(eigenvalue)
+          'width','height',                  # full axis lengths (for Ellipse)
+          'n_std', 'n'                       # confidence level and sample size
+        }
+    """
+    if x is None or len(x) < 3:
+        return None
+
+    pts = np.vstack([x, y])
+    # Need a non-degenerate (rank-2) cloud, otherwise the covariance is singular.
+    centered = pts - pts.mean(axis=1, keepdims=True)
+    if np.linalg.matrix_rank(centered) < 2:
+        return None
+
+    mean = pts.mean(axis=1)
+    cov = np.cov(pts)                       # 2x2
+    eigvals, eigvecs = np.linalg.eigh(cov)  # ascending, eigvecs columns
+    if np.any(eigvals <= 0):
+        return None
+
+    # Order largest-eigenvalue (major axis) first.
+    order = eigvals.argsort()[::-1]
+    eigvals = eigvals[order]
+    eigvecs = eigvecs[:, order]
+
+    major_vec = eigvecs[:, 0]
+    # Textbook principal angle (mod 180), used to draw the (symmetric) ellipse.
+    angle_deg = math.degrees(math.atan2(major_vec[1], major_vec[0])) % 180.0
+
+    # Resolve the major-axis direction to a full 0..360 using the base->mean
+    # displacement as the directional anchor.
+    offset_angle = None
+    offset_dist = None
+    resolved_vec = major_vec
+    if ref_point is not None:
+        dx = mean[0] - ref_point[0]
+        dy = mean[1] - ref_point[1]
+        offset_dist = math.hypot(dx, dy)
+        if offset_dist > 1e-9:
+            offset_angle = math.degrees(math.atan2(dy, dx)) % 360.0
+            # Flip the eigenvector into the displacement's half-plane.
+            if (major_vec[0] * dx + major_vec[1] * dy) < 0:
+                resolved_vec = -major_vec
+    angle_deg_360 = math.degrees(
+        math.atan2(resolved_vec[1], resolved_vec[0])) % 360.0
+
+    semi_major = n_std * math.sqrt(eigvals[0])
+    semi_minor = n_std * math.sqrt(eigvals[1])
+
+    return {
+        'mean': (float(mean[0]), float(mean[1])),
+        'cov': cov,
+        'var_x': float(cov[0, 0]),
+        'var_y': float(cov[1, 1]),
+        'cov_xy': float(cov[0, 1]),
+        'angle_deg': float(angle_deg),
+        'angle_deg_360': float(angle_deg_360),
+        'offset_angle_deg': (float(offset_angle) if offset_angle is not None
+                             else None),
+        'offset_dist': (float(offset_dist) if offset_dist is not None
+                        else None),
+        'semi_major': float(semi_major),
+        'semi_minor': float(semi_minor),
+        'width': float(2.0 * semi_major),
+        'height': float(2.0 * semi_minor),
+        'n_std': float(n_std),
+        'n': int(pts.shape[1]),
+    }
+
+
+def format_stats(stats):
+    """One-line summary of the fitted Gaussian for use in a plot title."""
+    mx, my = stats['mean']
+    return (f"μ=({mx:.0f}, {my:.0f})   "
+            f"σ²x={stats['var_x']:.0f}  σ²y={stats['var_y']:.0f}  "
+            f"cov={stats['cov_xy']:.0f}   θ={stats['angle_deg_360']:.1f}°(360)   "
+            f"axes={stats['semi_major']:.0f}/{stats['semi_minor']:.0f}px")
+
+
+def _euclidean(a, b):
+    """Euclidean distance between two (x, y) points; None if either is missing."""
+    if a is None or b is None:
+        return None
+    return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
 # --------------------------------------------------------------------------- #
@@ -558,6 +746,21 @@ def _draw_kde_heatmap(ax, x, y, bounds=None):
     return mappable
 
 
+def _draw_gaussian_ellipse(ax, stats, color='#00E5FF'):
+    """Overlay the fitted confidence ellipse and its center onto `ax`."""
+    if stats is None:
+        return
+    ellipse = Ellipse(
+        xy=stats['mean'], width=stats['width'], height=stats['height'],
+        angle=stats['angle_deg'], facecolor='none', edgecolor=color,
+        linewidth=2.2, linestyle='-', zorder=9,
+        label=f"Gaussian {stats['n_std']:.0f}σ")
+    ax.add_patch(ellipse)
+    # Mark the distribution mean (ellipse center).
+    ax.scatter([stats['mean'][0]], [stats['mean'][1]], color=color, s=30,
+               marker='x', linewidths=1.6, zorder=10)
+
+
 def _draw_centroid(ax, actual_centroid, base_centroid,
                    show_actual=True, show_base=True):
     """Plot the polygon centroid(s) on top of everything else.
@@ -597,36 +800,63 @@ def _format_axes(ax, title, legend=True, bounds=None, title_fontsize=12):
     ax.set_aspect('equal', adjustable='box')
     ax.grid(True, linestyle=':', alpha=0.6)
     if legend:
-        ax.legend(loc='upper right', frameon=True, shadow=True, fontsize=8)
+        ax.legend(loc='lower right', frameon=True, shadow=True, fontsize=8)
 
 
 def _draw_trial_data(ax, x, y, polygon, base_centroid, title, fixation_style,
                      color, alpha, show_actual, show_base, bounds,
-                     legend=True, title_fontsize=12):
+                     legend=True, title_fontsize=12,
+                     show_ellipse=SHOW_GAUSSIAN_ELLIPSE,
+                     ellipse_only=ELLIPSE_ONLY):
     """Draw one trial's polygon + fixations + centroids using explicit `bounds`.
 
     `bounds` (xmin, xmax, ymin, ymax) is applied verbatim, so callers can share
     one global window across a set of panels. Aspect is forced to 'equal' in
     _format_axes, keeping polygons geometrically proportioned at any scale.
+
+    When `show_ellipse` (or `ellipse_only`) is set, a 2D Gaussian is fitted to
+    the fixations and its confidence ellipse is overlaid. `ellipse_only` hides
+    the raw fixations/heatmap and appends the fitted parameters to the title.
+
+    Returns (n_fixations, heatmap_mappable_or_None, gaussian_stats_or_None).
     """
     actual_centroid = _draw_polygon(ax, polygon)
-    mappable = _draw_fixations(ax, x, y, fixation_style, color, alpha,
-                               label='Fixations', bounds=bounds)
+
+    mappable = None
+    if not ellipse_only:
+        mappable = _draw_fixations(ax, x, y, fixation_style, color, alpha,
+                                   label='Fixations', bounds=bounds)
+
+    stats = None
+    if show_ellipse or ellipse_only:
+        stats = fit_gaussian(x, y, ref_point=base_centroid)
+        if stats is not None:
+            _draw_gaussian_ellipse(ax, stats)
+        else:
+            print(f"Warning: too few/degenerate fixations to fit a Gaussian "
+                  f"ellipse ({len(x) if x else 0} point(s)); skipping ellipse.")
+
     _draw_centroid(ax, actual_centroid, base_centroid,
                    show_actual=show_actual, show_base=show_base)
+
+    if ellipse_only and stats is not None:
+        title = f"{title}\n{format_stats(stats)}"
     _format_axes(ax, title, legend=legend, bounds=bounds,
                  title_fontsize=title_fontsize)
-    return len(x), mappable
+    return (len(x) if x else 0), mappable, stats
 
 
 def _render_trial(ax, target_trial, sessions, title, fixation_style,
                   color, alpha, show_actual, show_base, legend=True,
-                  title_fontsize=12, bounds=None):
+                  title_fontsize=12, bounds=None,
+                  show_ellipse=SHOW_GAUSSIAN_ELLIPSE, ellipse_only=ELLIPSE_ONLY):
     """Collect and draw a single trial onto `ax`.
 
     When `bounds` is None and VIEW == 'polygon', the view defaults to the
     IMAGE_SIZE-wide stimulus window (a single plot has nothing to compare
     against). Pass explicit `bounds` to share one window across a set.
+
+    Returns (n_fixations, heatmap_mappable_or_None, gaussian_stats_or_None).
     """
     x, y, polygon, base_centroid, _n = collect_fixations(target_trial, sessions)
 
@@ -635,7 +865,8 @@ def _render_trial(ax, target_trial, sessions, title, fixation_style,
 
     return _draw_trial_data(ax, x, y, polygon, base_centroid, title,
                             fixation_style, color, alpha, show_actual, show_base,
-                            bounds, legend=legend, title_fontsize=title_fontsize)
+                            bounds, legend=legend, title_fontsize=title_fontsize,
+                            show_ellipse=show_ellipse, ellipse_only=ellipse_only)
 
 
 # --------------------------------------------------------------------------- #
@@ -644,15 +875,18 @@ def _render_trial(ax, target_trial, sessions, title, fixation_style,
 def plot_single_subject(session_folder, target_trial,
                         fixation_style=FIXATION_STYLE,
                         show_actual=SHOW_ACTUAL_CENTROID,
-                        show_base=SHOW_BASE_CENTROID):
+                        show_base=SHOW_BASE_CENTROID,
+                        show_ellipse=SHOW_GAUSSIAN_ELLIPSE,
+                        ellipse_only=ELLIPSE_ONLY):
     """Plot the polygon + valid fixations for one participant / one trial."""
     fig, ax = plt.subplots(figsize=(9, 9))
-    n_fix, mappable = _render_trial(
+    n_fix, mappable, _stats = _render_trial(
         ax, target_trial, [session_folder],
         title=f"Fixations - Trial {target_trial}\n"
               f"{os.path.basename(session_folder)}",
         fixation_style=fixation_style, color='#2ECC71', alpha=0.85,
-        show_actual=show_actual, show_base=show_base)
+        show_actual=show_actual, show_base=show_base,
+        show_ellipse=show_ellipse, ellipse_only=ellipse_only)
 
     print(f"[single] {os.path.basename(session_folder)}: {n_fix} valid fixations")
     if mappable is not None:
@@ -668,7 +902,9 @@ def plot_single_subject(session_folder, target_trial,
 def plot_aggregated_subjects(root_dir, target_trial,
                              fixation_style=FIXATION_STYLE,
                              show_actual=SHOW_ACTUAL_CENTROID,
-                             show_base=SHOW_BASE_CENTROID):
+                             show_base=SHOW_BASE_CENTROID,
+                             show_ellipse=SHOW_GAUSSIAN_ELLIPSE,
+                             ellipse_only=ELLIPSE_ONLY):
     """
     Plot valid fixations for `target_trial` across ALL sessions under root_dir.
 
@@ -681,12 +917,13 @@ def plot_aggregated_subjects(root_dir, target_trial,
         return
 
     fig, ax = plt.subplots(figsize=(9, 9))
-    n_fix, mappable = _render_trial(
+    n_fix, mappable, _stats = _render_trial(
         ax, target_trial, sessions,
         title=f"Aggregated fixations - Trial {target_trial}\n"
               f"{len(sessions)} sessions",
         fixation_style=fixation_style, color='#E74C3C', alpha=0.25,
-        show_actual=show_actual, show_base=show_base)
+        show_actual=show_actual, show_base=show_base,
+        show_ellipse=show_ellipse, ellipse_only=ellipse_only)
 
     print(f"[agg] {n_fix} fixations from {len(sessions)} sessions "
           f"for trial {target_trial}")
@@ -698,6 +935,112 @@ def plot_aggregated_subjects(root_dir, target_trial,
 
 
 # --------------------------------------------------------------------------- #
+# Automated statistical inference for the multi-trial dashboard
+# --------------------------------------------------------------------------- #
+def _fill_word(is_filled):
+    return {True: 'Filled', False: 'Unfilled'}.get(is_filled, 'Unknown')
+
+
+def plot_multi_statistics(stats_records, group_by, fill):
+    """
+    Emit the statistical-inference figure(s) that correspond to the grouped
+    independent variable in the multi-trial dashboard:
+
+      - group_by == 'rotations'  -> ellipse orientation angle vs polygon rotation.
+      - group_by == 'variations' -> distance(base centroid, ellipse center) vs step.
+      - fill == 'both'           -> additionally, a boxplot contrasting the
+                                    semi-major / semi-minor axis lengths between
+                                    the filled and unfilled conditions.
+
+    Records whose Gaussian fit failed (stats is None) are skipped with a note.
+    """
+    usable = [r for r in stats_records if r['stats'] is not None]
+    skipped = len(stats_records) - len(usable)
+    if skipped:
+        print(f"[stats] skipped {skipped} trial(s) without a valid Gaussian fit.")
+    if not usable:
+        print("[stats] no valid Gaussian fits; skipping statistics plot.")
+        return
+
+    fills_present = sorted({r['is_filled'] for r in usable},
+                           key=lambda v: v is not True)
+
+    # ---- Main plot driven by the grouped variable -------------------------- #
+    fig, ax = plt.subplots(figsize=(7, 5), constrained_layout=True)
+
+    cyclic_360 = (group_by == 'rotations')
+    if group_by == 'rotations':
+        xlabel = 'Polygon rotation (deg)'
+        ylabel = 'Ellipse orientation θ (deg, unwrapped)'
+        title = 'Ellipse orientation vs polygon rotation'
+        xkey = 'rotation'
+        # Use the direction-resolved 0..360 angle so rotations past 180 deg do
+        # not wrap and break the linear trend.
+        yfunc = lambda r: r['stats']['angle_deg_360']
+    else:  # 'variations'
+        xlabel = 'Stretch step level'
+        ylabel = 'Distance: base centroid → ellipse center (px)'
+        title = 'Centroid offset vs stretch step'
+        xkey = 'step'
+        yfunc = lambda r: _euclidean(r['base_centroid'], r['stats']['mean'])
+
+    unwrapped_y = []   # collect plotted y-values to set a dynamic ylim later
+    for is_filled in fills_present:
+        series = sorted((r for r in usable if r['is_filled'] == is_filled),
+                        key=lambda r: r[xkey])
+        xs = [r[xkey] for r in series]
+        ys = [yfunc(r) for r in series]
+        if cyclic_360 and len(ys) > 1:
+            # Phase-unwrap the cyclical orientation so the underlying linear
+            # trend is continuous (no artificial jumps at the 0/360 seam).
+            # np.unwrap works in radians; convert in and back out of degrees.
+            ys = list(np.degrees(np.unwrap(np.radians(ys), period=2 * np.pi)))
+        unwrapped_y.extend(v for v in ys if v is not None)
+        label = _fill_word(is_filled) if len(fills_present) > 1 else None
+        ax.plot(xs, ys, 'o-', label=label)
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.grid(True, linestyle=':', alpha=0.6)
+    if cyclic_360 and unwrapped_y:
+        # Fit the Y-axis to the unwrapped (continuous) range so the full upward
+        # trend is shown across panels without being clipped.
+        lo, hi = min(unwrapped_y), max(unwrapped_y)
+        pad = max(10.0, 0.08 * (hi - lo))
+        ax.set_ylim(lo - pad, hi + pad)
+        # Keep the continuous (unwrapped) line, but relabel the ticks back into
+        # standard 0..360 circle notation via modulo 360 (positions unchanged).
+        ticks = ax.get_yticks()
+        ax.set_yticks(ticks)
+        ax.set_yticklabels([f"{t % 360:.0f}°" for t in ticks])
+        ax.set_ylim(lo - pad, hi + pad)   # re-assert (set_yticks can rescale)
+    if len(fills_present) > 1:
+        ax.legend(title='Condition')
+
+    # ---- Fill comparison: semi-axis lengths, Filled vs Unfilled ------------ #
+    if fill == 'both' and {True, False} <= set(fills_present):
+        fig2, ax2 = plt.subplots(figsize=(7, 5), constrained_layout=True)
+        groups = {
+            'Major\nFilled': [r['stats']['semi_major'] for r in usable if r['is_filled']],
+            'Major\nUnfilled': [r['stats']['semi_major'] for r in usable if not r['is_filled']],
+            'Minor\nFilled': [r['stats']['semi_minor'] for r in usable if r['is_filled']],
+            'Minor\nUnfilled': [r['stats']['semi_minor'] for r in usable if not r['is_filled']],
+        }
+        labels = list(groups.keys())
+        data = list(groups.values())
+        bp = ax2.boxplot(data, labels=labels, patch_artist=True)
+        # Color major vs minor differently for quick reading.
+        palette = ['#3498DB', '#3498DB', '#E67E22', '#E67E22']
+        for patch, c in zip(bp['boxes'], palette):
+            patch.set_facecolor(c)
+            patch.set_alpha(0.6)
+        ax2.set_ylabel('Semi-axis length (px)')
+        ax2.set_title('Ellipse axis lengths: Filled vs Unfilled')
+        ax2.grid(True, axis='y', linestyle=':', alpha=0.6)
+
+
+# --------------------------------------------------------------------------- #
 # Mode C: several trials side by side
 # --------------------------------------------------------------------------- #
 def plot_multi_trials(root_dir, group_by=MULTI_GROUP_BY, sides=MULTI_SIDES,
@@ -705,7 +1048,10 @@ def plot_multi_trials(root_dir, group_by=MULTI_GROUP_BY, sides=MULTI_SIDES,
                       aggregate=MULTI_AGGREGATE, fill=MULTI_FILL,
                       fixation_style=FIXATION_STYLE,
                       show_actual=SHOW_ACTUAL_CENTROID,
-                      show_base=SHOW_BASE_CENTROID):
+                      show_base=SHOW_BASE_CENTROID,
+                      show_ellipse=SHOW_GAUSSIAN_ELLIPSE,
+                      ellipse_only=ELLIPSE_ONLY,
+                      show_stats_plot=SHOW_STATS_PLOT):
     """
     Plot several related trials side by side in a single figure.
 
@@ -732,14 +1078,25 @@ def plot_multi_trials(root_dir, group_by=MULTI_GROUP_BY, sides=MULTI_SIDES,
               f"step={step}, rotation={rotation}, fill={fill!r}.")
         return
 
-    n = len(selected)
-    ncols = min(n, 3)
-    nrows = math.ceil(n / ncols)
+    # Lay out the panels. With fill='both', use one row per condition (filled on
+    # top, unfilled below); otherwise a single row.
+    if fill == 'both':
+        rows = [[p for p in selected if p['is_filled'] is True],
+                [p for p in selected if p['is_filled'] is False]]
+        rows = [r for r in rows if r]          # drop an absent condition
+    else:
+        rows = [selected]
+    nrows = len(rows)
+    ncols = max(len(r) for r in rows)
+
     # constrained_layout (not tight_layout) cleanly makes room for the per-panel
     # colorbars without the "Axes not compatible with tight_layout" warning.
     fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 6 * nrows),
                              squeeze=False, constrained_layout=True)
-    flat_axes = [ax for row in axes for ax in row]
+    # Tighten the vertical gaps so the suptitle and the bottom legend sit close
+    # to the panels.
+    fig.set_constrained_layout_pads(w_pad=0.04, h_pad=0.01,
+                                    wspace=0.02, hspace=0.02)
 
     color = '#E74C3C' if aggregate else '#2ECC71'
     alpha = 0.25 if aggregate else 0.85
@@ -749,51 +1106,102 @@ def plot_multi_trials(root_dir, group_by=MULTI_GROUP_BY, sides=MULTI_SIDES,
         return {True: 'filled', False: 'unfilled'}.get(is_filled, 'fill unknown')
 
     # Pre-collect every panel's data so we can derive ONE shared window before
-    # drawing. panels: list of (params, x, y, polygon, base_centroid).
-    panels = []
+    # drawing. Keyed by trial_index (unique per panel, incl. filled/unfilled).
+    collected = {}
     for params in selected:
-        x, y, polygon, base_centroid, _n = collect_fixations(
-            params['trial_index'], sessions)
-        panels.append((params, x, y, polygon, base_centroid))
+        ti = params['trial_index']
+        x, y, polygon, base_centroid, _n = collect_fixations(ti, sessions)
+        collected[ti] = (x, y, polygon, base_centroid)
 
-    # Center every polygon on its own actual centroid, using one uniform window
-    # size so all panels stay the same scale and directly comparable. The size
-    # is driven by the largest polygon (its farthest vertex from the centroid),
-    # so each polygon is centered and fully shown. (VIEW == 'screen' keeps the
-    # full screen instead.)
-    centers = [_actual_centroid(p[3]) or p[4] for p in panels]
+    # Center every polygon on its own actual centroid and draw it in
+    # centroid-RELATIVE coordinates, so every panel shares the *identical* axis
+    # range [-half, +half] (same tick numbers, not just the same span). `half`
+    # is driven by the largest content across panels -- each polygon's farthest
+    # vertex AND, when drawn, the fitted confidence ellipse (so a big-STD ellipse
+    # is never clipped) -- keeping every panel centered, fully shown, and at one
+    # uniform scale. (VIEW == 'screen' keeps the absolute full-screen layout.)
+    include_ellipse = SHOW_GAUSSIAN_ELLIPSE or ELLIPSE_ONLY
+    centers = {}
     half = 0.0
-    for (_params, _x, _y, polygon, _b), c in zip(panels, centers):
+    for ti, (x, y, polygon, base_centroid) in collected.items():
+        c = _actual_centroid(polygon) or base_centroid
+        centers[ti] = c
         if c is None:
             continue
         for px, py in polygon:
             half = max(half, abs(px - c[0]), abs(py - c[1]))
+        if include_ellipse:
+            st = fit_gaussian(x, y, ref_point=base_centroid)
+            if st is not None:
+                mx, my = st['mean']
+                th = math.radians(st['angle_deg'])
+                a, b = st['semi_major'], st['semi_minor']
+                # Axis-aligned half-extents of the rotated ellipse, plus the
+                # ellipse center's offset from the polygon centroid.
+                ext_x = math.hypot(a * math.cos(th), b * math.sin(th))
+                ext_y = math.hypot(a * math.sin(th), b * math.cos(th))
+                half = max(half, abs(mx - c[0]) + ext_x,
+                           abs(my - c[1]) + ext_y)
     half = (half or IMAGE_SIZE / 2.0) + VIEW_MARGIN_PX
     use_screen = (VIEW == 'screen')
+    # One window shared by all panels, centered on the origin (the centroid).
+    shared_bounds = _square_bounds(0.0, 0.0, half)
 
-    for ax, (params, x, y, polygon, base_centroid), center in zip(
-            flat_axes, panels, centers):
-        ti = params['trial_index']
-        panel_title = (f"Trial {ti} ({fill_label(params['is_filled'])})\n"
-                       f"{params['sides']} sides, rot {params['rotation']}, "
-                       f"step {params['step']}")
-        bounds = (None if use_screen or center is None
-                  else _square_bounds(center[0], center[1], half))
-        _n_fix, mappable = _draw_trial_data(
-            ax, x, y, polygon, base_centroid, panel_title,
-            fixation_style=fixation_style, color=color, alpha=alpha,
-            show_actual=show_actual, show_base=show_base, bounds=bounds,
-            legend=False, title_fontsize=9)
-        # A small colorbar beside each panel, so it never overlaps the data.
-        if mappable is not None:
-            cbar = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.04,
-                                shrink=0.7)
-            cbar.ax.tick_params(labelsize=6)
-            cbar.set_label('Fixation density', fontsize=7)
+    stats_records = []
+    used_axes = set()
+    for r, row_params in enumerate(rows):
+        for cidx, params in enumerate(row_params):
+            ax = axes[r][cidx]
+            used_axes.add((r, cidx))
+            ti = params['trial_index']
+            x, y, polygon, base_centroid = collected[ti]
+            center = centers[ti]
+            panel_title = (f"Trial {ti} ({fill_label(params['is_filled'])})\n"
+                           f"{params['sides']} sides, rot {params['rotation']}, "
+                           f"step {params['step']}")
 
-    # Hide any unused axes in the grid.
-    for ax in flat_axes[n:]:
-        ax.axis('off')
+            # Shift this panel's geometry so its centroid sits at the origin;
+            # every panel then uses the same shared_bounds. Distances/angles fed
+            # to the statistics plots are translation-invariant, so unaffected.
+            if use_screen or center is None:
+                bounds = None
+                poly_p, x_p, y_p, base_p = polygon, x, y, base_centroid
+            else:
+                cx, cy = center
+                bounds = shared_bounds
+                poly_p = [(px - cx, py - cy) for px, py in polygon]
+                x_p = [xi - cx for xi in x]
+                y_p = [yi - cy for yi in y]
+                base_p = ((base_centroid[0] - cx, base_centroid[1] - cy)
+                          if base_centroid is not None else None)
+
+            _n_fix, mappable, stats = _draw_trial_data(
+                ax, x_p, y_p, poly_p, base_p, panel_title,
+                fixation_style=fixation_style, color=color, alpha=alpha,
+                show_actual=show_actual, show_base=show_base, bounds=bounds,
+                legend=False, title_fontsize=9,
+                show_ellipse=show_ellipse, ellipse_only=ellipse_only)
+            if bounds is not None:
+                ax.set_xlabel('X offset from centroid (px)', fontsize=9)
+                ax.set_ylabel('Y offset from centroid (px)', fontsize=9)
+            stats_records.append({
+                'trial_index': ti, 'sides': params['sides'],
+                'rotation': params['rotation'], 'step': params['step'],
+                'is_filled': params['is_filled'],
+                'base_centroid': base_p, 'stats': stats,
+            })
+            # A small colorbar beside each panel, so it never overlaps the data.
+            if mappable is not None:
+                cbar = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.04,
+                                    shrink=0.7)
+                cbar.ax.tick_params(labelsize=6)
+                cbar.set_label('Fixation density', fontsize=7)
+
+    # Hide any unused axes in the grid (e.g. a shorter condition row).
+    for r in range(nrows):
+        for cidx in range(ncols):
+            if (r, cidx) not in used_axes:
+                axes[r][cidx].axis('off')
 
     fixed = (f"{sides} sides, step {step}" if group_by == 'rotations'
              else f"{sides} sides, rotation {rotation}")
@@ -802,10 +1210,17 @@ def plot_multi_trials(root_dir, group_by=MULTI_GROUP_BY, sides=MULTI_SIDES,
     fig.suptitle(f"Multi-trial ({group_by}) - {fixed}  |  {fill_title}  |  "
                  f"varying {varying}  |  {len(sessions)} session(s)", fontsize=14)
 
-    # Shared legend (scatter style only) from the first populated panel.
-    handles, labels = flat_axes[0].get_legend_handles_labels()
+    # Shared legend from the first populated panel, placed OUTSIDE the panels
+    # (below the grid) so it never obscures the graphs. constrained_layout
+    # reserves space for an 'outside' legend.
+    handles, labels = axes[0][0].get_legend_handles_labels()
     if handles:
-        fig.legend(handles, labels, loc='upper right', fontsize=9)
+        fig.legend(handles, labels, loc='outside lower center',
+                   ncol=len(labels), fontsize=9)
+
+    # Automated statistical-inference figure for the grouped variable.
+    if show_stats_plot:
+        plot_multi_statistics(stats_records, group_by, fill)
 
     plt.show()
 
