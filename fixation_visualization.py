@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse
-from scipy.stats import gaussian_kde, ttest_ind
+from scipy.stats import gaussian_kde, ttest_ind, ttest_rel
 from shapely.geometry import Polygon, Point
 
 
@@ -79,7 +79,7 @@ FILL_COLORS = {True: '#3498DB', False: '#E67E22'}   # filled = blue, unfilled = 
 #   3. mean ellipse-center offset vs step size
 # ANALYTICS_FILL controls whether graphs 2 & 3 split by fill ('both') or show a
 # single condition ('filled' | 'unfilled'); graph 1 always compares both.
-ANALYTICS_FILL = 'both'   # 'filled' | 'unfilled' | 'both'
+ANALYTICS_FILL = 'filled'   # 'filled' | 'unfilled' | 'both'
 
 # --- Statistical significance annotations (analytics graphs) ---
 # Annotate statistically significant points/comparisons with an asterisk (*).
@@ -126,7 +126,7 @@ SHOW_GAUSSIAN_ELLIPSE = True  # overlay the fitted confidence ellipse
 ELLIPSE_N_STD = 1.8           # ellipse radius in standard deviations (~95% at 2)
 ELLIPSE_ONLY = False          # draw ONLY the ellipse + polygon (hide fixations);
                               # the title then lists the fitted parameters
-SHOW_STATS_PLOT = True       # in 'multi' mode, also emit the statistical-inference plot
+SHOW_STATS_PLOT = False       # in 'multi' mode, also emit the statistical-inference plot
 
 # --- Multi-trial layout (PLOT_MODE == 'multi') ---
 # 'rotations' : fix (sides, step), show every rotation of that polygon.
@@ -138,7 +138,7 @@ MULTI_ROTATION = 0        # used when MULTI_GROUP_BY == 'variations'
 MULTI_AGGREGATE = True    # True: pool fixations across all sessions; False: EXAMPLE_SESSION only
 # Each geometric polygon was shown twice: once image-filled, once not. Choose
 # which to display so the figure is not overcrowded.
-MULTI_FILL = 'both'     # 'filled' | 'unfilled' | 'both'
+MULTI_FILL = 'filled'     # 'filled' | 'unfilled' | 'both'
 
 # --- Experiment trial-generation parameters (mirror run_experiment.py) ---
 # The CSV does not store the image-fill flag, but the trial order is fully
@@ -696,6 +696,18 @@ def welch_p(sample_a, sample_b):
         return None
     try:
         return float(ttest_ind(sample_a, sample_b, equal_var=False).pvalue)
+    except Exception:
+        return None
+
+
+def paired_p(sample_a, sample_b):
+    """Paired t-test p-value (same trials, two measures); None if unusable."""
+    if sample_a is None or sample_b is None:
+        return None
+    if len(sample_a) != len(sample_b) or len(sample_a) < 2:
+        return None
+    try:
+        return float(ttest_rel(sample_a, sample_b).pvalue)
     except Exception:
         return None
 
@@ -1384,35 +1396,38 @@ def _fig_offset_vs(usable, fills_to_plot, xkey, xlabel, title, dodge):
                ('Offset from center of mass', 'actual_centroid', '--', 0.6)]
     xvals = sorted({r[xkey] for r in usable if r[xkey] is not None})
 
+    # Asterisk colors encode the centroid being compared: bright orange for the
+    # original centroid, dark orange for the center of mass.
+    metric_star_colors = ['#FF8C00', '#8A4C14']
+
     series = []
+    samples = {}   # (metric_index, is_filled, x) -> list of per-trial offsets
+    tops = {}      # (metric_index, is_filled, x) -> mean + SD (point top)
     for isf in fills_to_plot:
         cond = f" ({_fill_word(isf)})" if len(fills_to_plot) > 1 else ""
-        for name, key, ls, shade in metrics:
-            xs, ys, es, raw = [], [], [], []
+        for mi, (name, key, ls, shade) in enumerate(metrics):
+            xs, ys, es = [], [], []
             for xv in xvals:
                 vals = [_euclidean(r[key], r['stats']['mean']) for r in usable
                         if r['is_filled'] == isf and r[xkey] == xv]
                 vals = [to_distance(v) for v in vals if v is not None]
                 if not vals:
                     continue
+                m = float(np.mean(vals))
+                s = float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0
                 xs.append(xv)
-                ys.append(float(np.mean(vals)))
-                es.append(float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0)
-                raw.append(vals)               # keep samples for significance
+                ys.append(m)
+                es.append(s)
+                samples[(mi, isf, xv)] = vals
+                tops[(mi, isf, xv)] = m + s
             if not xs:
                 continue
-            series.append((xs, ys, es, raw, _shade(FILL_COLORS[isf], shade), ls,
+            series.append((xs, ys, es, _shade(FILL_COLORS[isf], shade), ls,
                            f"{name}{cond}"))
 
     n = len(series)
-    # A vertical step used to lift the asterisks above the points / error bars
-    # and to stagger them across curves so the text never overlaps.
-    all_tops = [y + e for _xs, ys, es, *_ in series for y, e in zip(ys, es)]
-    yspan = (max(all_tops) - min(all_tops)) if len(all_tops) > 1 else 1.0
-    star_step = max(0.03 * yspan, 1e-6)
-
     handles, labels = [], []
-    for idx, (xs, ys, es, raw, color, ls, label) in enumerate(series):
+    for idx, (xs, ys, es, color, ls, label) in enumerate(series):
         shift = (idx - (n - 1) / 2.0) * dodge
         xs_d = [x + shift for x in xs]
         ax.errorbar(xs_d, ys, yerr=es, color=color, linestyle=ls, marker='o',
@@ -1420,15 +1435,34 @@ def _fig_offset_vs(usable, fills_to_plot, xkey, xlabel, title, dodge):
         handles.append(Line2D([0], [0], color=color, linestyle=ls, linewidth=2))
         labels.append(label)
 
-        # Significance vs the curve's baseline (its first x value). Black when a
-        # single curve is shown, otherwise the curve's own color.
-        if SHOW_SIGNIFICANCE and len(raw) > 1:
-            star_color = 'black' if n == 1 else color
-            baseline = raw[0]
-            for j in range(1, len(xs)):
-                if is_significant(welch_p(raw[j], baseline)):
-                    y_top = ys[j] + es[j] + star_step * (1.0 + idx)
-                    _annotate_star(ax, xs_d[j], y_top, star_color)
+    # Significance asterisks. With both conditions shown, compare Filled vs
+    # Unfilled within each centroid (asterisk colored by centroid). With a single
+    # condition, compare the two centroids against each other (paired, since both
+    # come from the same trials) and use a black asterisk.
+    if SHOW_SIGNIFICANCE and tops:
+        all_tops = list(tops.values())
+        yspan = (max(all_tops) - min(all_tops)) if len(all_tops) > 1 else 1.0
+        star_step = max(0.03 * yspan, 1e-6)
+        if {True, False} <= set(fills_to_plot):
+            for mi in range(len(metrics)):
+                for xv in xvals:
+                    a = samples.get((mi, True, xv))
+                    b = samples.get((mi, False, xv))
+                    if is_significant(welch_p(a, b)):
+                        base_top = max(tops.get((mi, True, xv), 0.0),
+                                       tops.get((mi, False, xv), 0.0))
+                        # Stagger the two centroids vertically to avoid overlap.
+                        y_top = base_top + star_step * (1.0 + mi)
+                        _annotate_star(ax, xv, y_top, metric_star_colors[mi])
+        else:
+            isf = fills_to_plot[0]
+            for xv in xvals:
+                a = samples.get((0, isf, xv))   # original centroid
+                b = samples.get((1, isf, xv))   # center of mass
+                if is_significant(paired_p(a, b)):
+                    base_top = max(tops.get((0, isf, xv), 0.0),
+                                   tops.get((1, isf, xv), 0.0))
+                    _annotate_star(ax, xv, base_top + star_step, 'black')
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(f'Mean model-center offset ({dist_unit_label()})')
