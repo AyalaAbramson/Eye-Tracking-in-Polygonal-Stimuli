@@ -1494,26 +1494,28 @@ def _fig_orientation_vs_rotation(usable, fills_to_plot):
             # 180 deg (pi rad) period: this removes the symmetry-induced "drop"
             # (e.g. past 135 deg) and keeps the orientation trend continuous.
             ys = list(np.degrees(np.unwrap(np.radians(ys), period=np.pi)))
+            # Align the orientation axis with the polygon-rotation axis: shift the
+            # whole (already continuous) curve so rotation 0 deg maps to 0 deg
+            # orientation. A constant offset preserves continuity -- no new phase
+            # jumps -- it only re-bases where the trend starts.
+            base_idx = xs.index(0) if 0 in xs else 0
+            offset0 = ys[base_idx]
+            ys = [y - offset0 for y in ys]
         all_y.extend(ys)
         label = _fill_word(isf) if len(fills_to_plot) > 1 else 'Orientation θ'
         ax.plot(xs, ys, 'o-', color=FILL_COLORS[isf], label=label)
 
     ax.set_xlabel('Polygon rotation (deg)')
-    ax.set_ylabel('Mean Model orientation θ (deg, unwrapped)')
+    ax.set_ylabel('Mean Model orientation θ (deg, baseline-aligned)')
     ax.set_title('All trials — mean Model orientation vs polygon rotation')
     if rotations:
         ax.set_xticks(rotations)
     if all_y:
-        # Match the multi-mode orientation plot: start the Y axis at 250 deg.
-        bottom = 250.0
-        hi = max(max(all_y), bottom)
-        top = hi + max(10.0, 0.08 * (hi - bottom))
-        ax.set_ylim(bottom, top)
-        # Relabel ticks back into standard 0..360 circle notation (positions kept).
-        ticks = ax.get_yticks()
-        ax.set_yticks(ticks)
-        ax.set_yticklabels([f"{t % 360:.0f}°" for t in ticks])
-        ax.set_ylim(bottom, top)
+        # Fit the Y axis to the baseline-aligned data (starts at 0 deg for the
+        # rotation-0 baseline). Dynamic limits so nothing is clipped/dropped.
+        lo, hi = min(all_y), max(all_y)
+        pad = max(10.0, 0.08 * (hi - lo))
+        ax.set_ylim(lo - pad, hi + pad)
     ax.grid(True, linestyle=':', alpha=0.6)
     if len(fills_to_plot) > 1:
         ax.legend(title='Condition', loc='upper left')
