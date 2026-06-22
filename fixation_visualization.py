@@ -28,8 +28,31 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse
-from scipy.stats import gaussian_kde, ttest_ind, ttest_rel
+from matplotlib.legend import Legend
+from matplotlib.legend_handler import HandlerPatch
+from scipy.stats import gaussian_kde, ttest_ind, ttest_rel, linregress
+from scipy.stats import t as t_dist
 from shapely.geometry import Polygon, Point
+
+
+class _HandlerEllipse(HandlerPatch):
+    """Draw Ellipse legend keys as a little ellipse instead of the default box,
+    so the Gaussian-fit entry clearly matches the ellipse drawn in the graph."""
+
+    def create_artists(self, legend, orig_handle, xdescent, ydescent,
+                       width, height, fontsize, trans):
+        center = (width / 2.0 - xdescent, height / 2.0 - ydescent)
+        e = Ellipse(xy=center, width=width + xdescent, height=height + ydescent)
+        e.set_facecolor(orig_handle.get_facecolor())
+        e.set_edgecolor(orig_handle.get_edgecolor())
+        e.set_linewidth(orig_handle.get_linewidth())
+        e.set_linestyle(orig_handle.get_linestyle())
+        e.set_transform(trans)
+        return [e]
+
+
+# Apply to every legend in the process (Ellipse patches -> ellipse glyphs).
+Legend.update_default_handler_map({Ellipse: _HandlerEllipse()})
 
 
 # =====================================================================
@@ -88,7 +111,7 @@ ANALYTICS_FILL = 'filled'   # 'filled' | 'unfilled' | 'both'
 #     first x value) of the same curve.
 # When several curves share an axes, the asterisk takes its curve's color (and
 # is vertically staggered) for readability; a single curve uses black.
-SHOW_SIGNIFICANCE = True   # toggle the significance asterisks
+SHOW_SIGNIFICANCE = False   # toggle the significance asterisks
 SIGNIFICANCE_ALPHA = 0.05  # p-value threshold for marking a point significant
 
 # --- Fixation time window ---
@@ -1384,6 +1407,20 @@ def _circular_mean_deg(angles):
     return math.degrees(math.atan2(s, c)) % 360.0
 
 
+def _circular_std_deg(angles):
+    """Circular standard deviation (deg) of angles in degrees (Mardia).
+
+    Returns 0 for <2 samples; larger values mean more angular dispersion.
+    """
+    if len(angles) < 2:
+        return 0.0
+    s = sum(math.sin(math.radians(a)) for a in angles)
+    c = sum(math.cos(math.radians(a)) for a in angles)
+    R = math.hypot(s, c) / len(angles)          # mean resultant length
+    R = max(min(R, 1.0), 1e-6)                   # clamp to keep the log finite
+    return math.degrees(math.sqrt(-2.0 * math.log(R)))
+
+
 def _fig_offset_vs(usable, fills_to_plot, xkey, xlabel, title, dodge):
     """Line plot: mean ellipse-center offset (+/-SD) vs `xkey` (step or rotation).
 
@@ -1475,13 +1512,50 @@ def _fig_offset_vs(usable, fills_to_plot, xkey, xlabel, title, dodge):
                    ncol=min(len(handles), 2), fontsize=8)
 
 
+def _add_regression(ax, xs, ys, color, x_range):
+    """Draw an OLS trendline + 95% CI band over `x_range`; return a stats string.
+
+    The 95% confidence interval for the mean response is computed analytically
+    (Student-t), so no seaborn dependency is needed. Returns 'r / R^2 / p' text,
+    or None when there are too few points.
+    """
+    if len(xs) < 2:
+        return None
+    xa = np.asarray(xs, dtype=float)
+    ya = np.asarray(ys, dtype=float)
+    lr = linregress(xa, ya)
+    xl = np.linspace(x_range[0], x_range[1], 100)
+    yl = lr.slope * xl + lr.intercept
+    ax.plot(xl, yl, color=color, linestyle='-', linewidth=1.6, alpha=0.9,
+            zorder=1)
+
+    n = len(xa)
+    if n >= 3:
+        resid = ya - (lr.slope * xa + lr.intercept)
+        s_err = math.sqrt(np.sum(resid ** 2) / (n - 2))
+        xmean = xa.mean()
+        sxx = np.sum((xa - xmean) ** 2)
+        if sxx > 0:
+            se = s_err * np.sqrt(1.0 / n + (xl - xmean) ** 2 / sxx)
+            tcrit = t_dist.ppf(0.975, n - 2)
+            ax.fill_between(xl, yl - tcrit * se, yl + tcrit * se,
+                            color=color, alpha=0.15, zorder=0)
+
+    return (f"r = {lr.rvalue:.2f},  R² = {lr.rvalue ** 2:.2f},  "
+            f"p = {lr.pvalue:.3f}")
+
+
 def _fig_orientation_vs_rotation(usable, fills_to_plot):
     """Line plot: mean ellipse orientation (circular mean) vs polygon rotation."""
     fig, ax = plt.subplots(figsize=(7, 5), constrained_layout=True)
     rotations = sorted({r['rotation'] for r in usable if r['rotation'] is not None})
     all_y = []
-    for isf in fills_to_plot:
-        xs, ys = [], []
+    # Slightly stagger the conditions on X so their error bars do not overlap.
+    dodge = 2.0
+    x_range = (min(rotations), max(rotations)) if rotations else (0, 1)
+    reg_notes = []          # (text, color) per condition for the stats box
+    for i, isf in enumerate(fills_to_plot):
+        xs, ys, es = [], [], []
         for rot in rotations:
             angs = [r['stats']['angle_deg_360'] for r in usable
                     if r['is_filled'] == isf and r['rotation'] == rot]
@@ -1489,6 +1563,7 @@ def _fig_orientation_vs_rotation(usable, fills_to_plot):
                 continue
             xs.append(rot)
             ys.append(_circular_mean_deg(angs))
+            es.append(_circular_std_deg(angs))   # angular variability (deg)
         if len(ys) > 1:
             # An ellipse axis is only defined modulo 180 deg, so unwrap with a
             # 180 deg (pi rad) period: this removes the symmetry-induced "drop"
@@ -1501,13 +1576,29 @@ def _fig_orientation_vs_rotation(usable, fills_to_plot):
             base_idx = xs.index(0) if 0 in xs else 0
             offset0 = ys[base_idx]
             ys = [y - offset0 for y in ys]
-        all_y.extend(ys)
+        # Include the error-bar extent so the Y limits never clip the SD whiskers.
+        all_y.extend([y - e for y, e in zip(ys, es)])
+        all_y.extend([y + e for y, e in zip(ys, es)])
         label = _fill_word(isf) if len(fills_to_plot) > 1 else 'Orientation θ'
-        ax.plot(xs, ys, 'o-', color=FILL_COLORS[isf], label=label)
+        shift = (i - (len(fills_to_plot) - 1) / 2.0) * dodge
+        xs_d = [x + shift for x in xs]
+        # Darker shade for the data points + SD whiskers so they stand out from
+        # the (lighter) regression line drawn in the base fill color.
+        point_color = _shade(FILL_COLORS[isf], 0.6)
+        ax.errorbar(xs_d, ys, yerr=es, fmt='o', color=point_color,
+                    capsize=4, elinewidth=1.2, alpha=0.9, label=label)
 
-    ax.set_xlabel('Polygon rotation (deg)')
-    ax.set_ylabel('Mean Model orientation θ (deg, baseline-aligned)')
-    ax.set_title('All trials — mean Model orientation vs polygon rotation')
+        # Linear regression trendline + 95% CI band, with stats for the box.
+        note = _add_regression(ax, xs, ys, FILL_COLORS[isf], x_range)
+        if note is not None:
+            prefix = f"{_fill_word(isf)}: " if len(fills_to_plot) > 1 else ""
+            reg_notes.append((prefix + note, FILL_COLORS[isf]))
+
+    ax.set_xlabel('Polygon rotation (deg)', fontsize=11)
+    ax.set_ylabel('Mean Model orientation θ (deg, baseline-aligned)', fontsize=11)
+    ax.set_title('All trials — mean Model orientation vs polygon rotation',
+                 fontsize=13)
+    ax.tick_params(labelsize=10)
     if rotations:
         ax.set_xticks(rotations)
     if all_y:
@@ -1516,7 +1607,17 @@ def _fig_orientation_vs_rotation(usable, fills_to_plot):
         lo, hi = min(all_y), max(all_y)
         pad = max(10.0, 0.08 * (hi - lo))
         ax.set_ylim(lo - pad, hi + pad)
-    ax.grid(True, linestyle=':', alpha=0.6)
+    ax.grid(True, linestyle=':', alpha=0.5, linewidth=0.6)
+
+    # Publication-ready stats box (Pearson r, R^2, p) in the lower-right corner.
+    y0 = 0.03
+    for text, color in reversed(reg_notes):
+        ax.text(0.975, y0, text, transform=ax.transAxes, ha='right', va='bottom',
+                fontsize=9, color=color,
+                bbox=dict(boxstyle='round,pad=0.35', facecolor='white',
+                          edgecolor='0.6', alpha=0.9))
+        y0 += 0.075
+
     if len(fills_to_plot) > 1:
         ax.legend(title='Condition', loc='upper left')
 
